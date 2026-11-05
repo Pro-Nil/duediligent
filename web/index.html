@@ -77,6 +77,11 @@ $("go").onclick = () => {
     if (m.type === "result") {
       stages.finish();
       renderReport($("result"), m);
+      if (m.case_id) {
+        markSeen(m.case_id);
+        // Keep listening: if the vendor uploads while this page is open, say so.
+        watchCase(m.case_id, 0, m.vendor, () => { location.href = `/report/${m.case_id}`; });
+      }
       $("result").scrollIntoView({behavior: "smooth", block: "start"});
       finish();
     }

@@ -298,6 +298,7 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
     result = {
         "request": request,
         "reviewed_at": now_iso(),
+        "created_at": now_iso(),
         "elapsed_seconds": round(time.time() - started, 1),
         "intake": intake,
         "identity": ctx["identity"],
@@ -316,6 +317,7 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
         "api_calls": len(crust.calls),
         "ctx": ctx,
     }
+    result["history"] = [{"at": result["created_at"], "kind": "review", "by": "agent", "outcome": decision.outcome, "event": "Review completed"}]
     result["vendor_email"] = report.vendor_email(result)
     if watch and decision.outcome == policy.APPROVE and ctx["identity"].get("domain"):
         result["watch"] = watch_mod.ensure_watch(crust, ctx["identity"]["domain"])
@@ -325,6 +327,16 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
         result["case_id"] = Path(result["paths"]["folder"]).name
     emit("done", decision.outcome)
     return result
+
+
+def _history(result: dict) -> list[dict]:
+    """The case's timeline. Older cases have no first entry, so rebuild it."""
+    hist = list(result.get("history") or [])
+    if not hist or hist[0].get("kind") != "review":
+        first_outcome = hist[0]["from"] if hist and hist[0].get("from") else result["decision"]["outcome"]
+        hist.insert(0, {"at": result.get("created_at") or result.get("reviewed_at"), "kind": "review", "by": "agent",
+                        "outcome": first_outcome, "event": "Review completed"})
+    return hist
 
 
 def _watch_message(w: dict) -> str:
@@ -365,7 +377,12 @@ def apply_document(case_id: str, data: bytes, filename: str, emit: Emit | None =
     emit("info", f"Decision: {decision.outcome}")
     result.update({"decision": decision.to_dict(), "audit": audit, "ctx": ctx, "documents": ctx["documents"],
                    "evidence": store.to_list(), "reviewed_at": now_iso(),
-                   "history": result.get("history", []) + [{"at": now_iso(), "event": f"Document {filename} checked", "outcome": decision.outcome}]})
+                   "history": _history(result) + [{
+                       "at": now_iso(), "kind": "vendor_upload", "by": "vendor", "file": filename,
+                       "report_type": doc.get("report_type"), "accepted": doc.get("readable", False) and not any(
+                           c.rule.startswith("R5") for c in decision.conditions + decision.referrals),
+                       "from": result["decision"]["outcome"], "outcome": decision.outcome,
+                       "event": f"Vendor uploaded {filename}"}]})
     result["vendor_email"] = report.vendor_email(result)
     if decision.outcome == policy.APPROVE and ident.get("domain"):
         result["watch"] = watch_mod.ensure_watch(crust or Crust(), ident["domain"])

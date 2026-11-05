@@ -13,7 +13,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .agent import apply_document, case_dir, review
+from .agent import RUNS, apply_document, case_dir, review
+from .agent import _history as agent_history
 from .config import load_env
 from .crust import Crust
 from .llm import LLM
@@ -111,11 +112,81 @@ def _case(case_id: str) -> Path:
         raise HTTPException(404, "No such case")
 
 
+def _status(result: dict) -> str:
+    """Where the case stands, in the words a reviewer would use."""
+    outcome = result["decision"]["outcome"]
+    uploads = [h for h in result.get("history") or [] if h.get("kind") == "vendor_upload"]
+    if outcome == "REFER TO HUMAN":
+        return "Needs a person"
+    if outcome == "APPROVE WITH CONDITIONS":
+        return "Vendor responded" if uploads else "Waiting on vendor"
+    return "Done"
+
+
+def _seen(folder: Path) -> int:
+    try:
+        return int(json.loads((folder / "seen.json").read_text(encoding="utf-8")).get("version", 0))
+    except (OSError, ValueError):
+        return 0
+
+
+def _case_row(folder: Path) -> dict | None:
+    try:
+        result = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    history = agent_history(result)
+    uploads = [h for h in history if h.get("kind") == "vendor_upload"]
+    version = len(uploads)
+    return {
+        "case_id": folder.name,
+        "vendor": result["identity"].get("name") or result["intake"].get("vendor_name") or "Unidentified",
+        "domain": result["identity"].get("domain"),
+        "request": result.get("request"),
+        "outcome": result["decision"]["outcome"],
+        "status": _status(result),
+        "conditions": len(result["decision"]["conditions"]),
+        "created_at": history[0].get("at") if history else result.get("reviewed_at"),
+        "updated_at": history[-1].get("at") if history else result.get("reviewed_at"),
+        "last_event": history[-1] if history else None,
+        "version": version,
+        "unread": version > _seen(folder),
+    }
+
+
+@app.get("/api/cases")
+def list_cases(limit: int = 200) -> dict:
+    rows = [r for r in (_case_row(f) for f in RUNS.iterdir() if f.is_dir()) if r] if RUNS.exists() else []
+    rows.sort(key=lambda r: r["updated_at"] or "", reverse=True)
+    return {"cases": rows[:limit], "unread": sum(r["unread"] for r in rows)}
+
+
+@app.get("/api/case/{case_id}/version")
+def case_version(case_id: str) -> dict:
+    row = _case_row(_case(case_id))
+    return {k: row[k] for k in ("version", "outcome", "status", "last_event", "unread", "updated_at")}
+
+
+@app.post("/api/case/{case_id}/seen")
+def mark_seen(case_id: str) -> dict:
+    folder = _case(case_id)
+    row = _case_row(folder)
+    (folder / "seen.json").write_text(json.dumps({"version": row["version"]}), encoding="utf-8")
+    return {"ok": True, "version": row["version"]}
+
+
+@app.get("/reviews")
+def reviews_page() -> FileResponse:
+    return FileResponse(WEB / "reviews.html")
+
+
 @app.get("/api/case/{case_id}")
 def case_info(case_id: str) -> dict:
     result = json.loads((_case(case_id) / "report.json").read_text(encoding="utf-8"))
     result["case_id"] = case_id
+    result["history"] = agent_history(result)
     out = _summary(result)
+    out["version"] = len([h for h in result["history"] if h.get("kind") == "vendor_upload"])
     out["vendor_email"] = result.get("vendor_email")
     out["case_url"] = f"/vendor/{case_id}"
     out["documents"] = [{k: doc.get(k) for k in ("filename", "report_type", "period_end", "opinion")} for doc in result.get("documents") or []]

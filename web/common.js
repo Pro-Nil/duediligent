@@ -36,11 +36,89 @@ const ruleName = r => RULES[(r || "").split(" ")[0]] || r;
 const fmtDate = iso => { try { return new Date(iso).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}); } catch (e) { return iso; } };
 
 function topbar(active) {
-  const links = [["/", "Review", "review"], ["/batch", "Supplier register", "batch"]];
+  const links = [["/", "New review", "review"], ["/reviews", "Reviews", "reviews"], ["/batch", "Supplier register", "batch"]];
   document.body.insertAdjacentHTML("afterbegin", `<div class="topbar"><div class="in">
     <a class="brand" href="/"><span class="mark">dd</span>duediligent</a>
-    <nav class="nav">${links.map(([h, t, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${t}</a>`).join("")}</nav>
+    <nav class="nav">${links.map(([h, t, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${t}${k === "reviews" ? `<span class="navbadge hide" id="unread" title="Reviews with a vendor response you have not opened"></span>` : ""}</a>`).join("")}</nav>
     <span class="tag">Vendor security reviews · every claim cited</span></div></div>`);
+  pollUnread();
+  setInterval(pollUnread, 20000);
+}
+
+/* ---------- Updates from vendors ---------- */
+async function pollUnread() {
+  try {
+    const r = await fetch("/api/cases?limit=500").then(x => x.json());
+    const b = $("unread");
+    if (b) { b.textContent = r.unread; b.classList.toggle("hide", !r.unread); }
+    document.title = document.title.replace(/^\(\d+\) /, "");
+    if (r.unread) document.title = `(${r.unread}) ${document.title}`;
+    return r;
+  } catch (e) { return null; }
+}
+
+function alertsSupported() { return "Notification" in window; }
+function alertsOn() { return alertsSupported() && Notification.permission === "granted"; }
+async function enableAlerts(btn) {
+  if (!alertsSupported()) return;
+  const p = await Notification.requestPermission();
+  if (btn) btn.textContent = p === "granted" ? "Desktop alerts on" : "Alerts blocked in browser settings";
+}
+function desktopAlert(title, body, url) {
+  if (!alertsOn()) return;
+  const n = new Notification(title, {body, tag: url});
+  n.onclick = () => { window.focus(); if (url) location.href = url; n.close(); };
+}
+
+const UPLOAD_SAY = h => {
+  const kind = CERTS[h.report_type] || "document";
+  if (!h.from || h.from === h.outcome) return `uploaded ${h.file} (${kind}). The decision is still: ${deco(h.outcome).label}.`;
+  return `uploaded ${h.file} (${kind}). The decision changed from ${deco(h.from).label} to ${deco(h.outcome).label}.`;
+};
+
+/* Watch one open case. When the vendor uploads something, show a banner and a desktop alert. */
+function watchCase(caseId, version, vendor, onReload) {
+  let known = version;
+  const tick = async () => {
+    try {
+      const v = await fetch(`/api/case/${caseId}/version`).then(r => r.json());
+      if (v.version > known) {
+        known = v.version;
+        const h = v.last_event || {};
+        showUpdateBanner(`${vendor} ${UPLOAD_SAY(h)}`, h.outcome, onReload);
+        desktopAlert(`${vendor} responded`, UPLOAD_SAY(h), `/report/${caseId}`);
+        pollUnread();
+      }
+    } catch (e) {}
+  };
+  return setInterval(tick, 6000);
+}
+
+function showUpdateBanner(text, outcome, onReload) {
+  let el = $("update-banner");
+  if (!el) {
+    document.body.insertAdjacentHTML("beforeend", `<div class="update-banner" id="update-banner" role="status"></div>`);
+    el = $("update-banner");
+  }
+  el.style.setProperty("--c", deco(outcome).c);
+  el.innerHTML = `<div><div class="eyebrow">Vendor response</div><div>${esc(text)}</div></div>
+    <button class="btn sm" id="ub-load">Show the update</button><button class="btn ghost sm" id="ub-x" aria-label="Dismiss">✕</button>`;
+  el.classList.add("show");
+  $("ub-x").onclick = () => el.classList.remove("show");
+  $("ub-load").onclick = () => { el.classList.remove("show"); onReload(); };
+}
+
+function markSeen(caseId) { return fetch(`/api/case/${caseId}/seen`, {method: "POST"}).then(() => pollUnread()).catch(() => {}); }
+
+function activityHTML(history) {
+  if (!history || !history.length) return "";
+  return `<section class="card pad"><h3>Activity</h3><ol class="timeline">${history.map(h => {
+    const when = h.at ? fmtDate(h.at) : "";
+    if (h.kind === "vendor_upload") return `<li><span class="tdot" style="--c:${deco(h.outcome).c}"></span><div><b>Vendor uploaded ${esc(h.file)}</b>
+      <div class="small mut">${esc(CERTS[h.report_type] || "Document")} · ${h.accepted ? "accepted" : "did not meet the requirement"}</div>
+      <div class="small">${h.from && h.from !== h.outcome ? `${esc(deco(h.from).label)} → ` : ""}${badge(h.outcome)}</div><div class="small mut">${esc(when)}</div></div></li>`;
+    return `<li><span class="tdot" style="--c:${deco(h.outcome).c}"></span><div><b>${esc(h.event || "Review completed")}</b><div class="small">${badge(h.outcome)}</div><div class="small mut">${esc(when)}</div></div></li>`;
+  }).join("")}</ol></section>`;
 }
 
 async function postStream(url, body, onEvent) {
@@ -285,6 +363,7 @@ function renderReport(root, s, opts = {}) {
     </section>
     <aside class="side">
       ${next}
+      ${activityHTML(rep.history)}
       <section class="card pad fade">
         <h3>Is it a real, trading business?</h3>
         <p style="margin:2px 0 10px"><span class="pill" style="--c:${bc.ok ? "var(--ok)" : "var(--warn)"};--cs:${bc.ok ? "var(--ok-soft)" : "var(--warn-soft)"}">${esc(bc.verdict)}</span> <span class="mut small">${esc(bc.text)}</span></p>
@@ -317,9 +396,17 @@ function nextCard(s, opts) {
     const byDoc = conds.filter(c => c.rule.startsWith("R5")).length;
     const byPerson = conds.length - byDoc;
     const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-    return `<section class="card next"><div class="eyebrow">Next step · waiting on the vendor</div>
-      <h3 style="margin-top:4px">Ask the vendor for evidence</h3>
-      <p class="small" style="margin:0 0 8px;color:var(--fg-2)">This review can't finish from public information alone. Send the vendor this link:</p>
+    const uploads = (s.report?.history || []).filter(h => h.kind === "vendor_upload");
+    const last = uploads[uploads.length - 1];
+    const certCond = conds.find(c => c.rule.startsWith("R5"));
+    const head = last
+      ? `<div class="eyebrow">Next step · the vendor responded</div>
+         <h3 style="margin-top:4px">${last.accepted ? "Their document was accepted" : "Their document was not enough"}</h3>
+         <p class="small" style="margin:0 0 8px;color:var(--fg-2)">They uploaded <b>${esc(last.file)}</b> (${esc(CERTS[last.report_type] || "document")}). ${last.accepted ? "" : esc(certCond ? certCond.text : "")} ${byDoc ? "Send the same link to ask for a replacement:" : "Anything else still open needs a person."}</p>`
+      : `<div class="eyebrow">Next step · waiting on the vendor</div>
+         <h3 style="margin-top:4px">Ask the vendor for evidence</h3>
+         <p class="small" style="margin:0 0 8px;color:var(--fg-2)">This review can't finish from public information alone. Send the vendor this link:</p>`;
+    return `<section class="card next">${head}
       <div class="row" style="margin-top:0"><input readonly value="${esc(url)}" aria-label="Vendor link"><button class="btn ghost sm" data-copy="${esc(url)}">Copy</button></div>
       <ol class="small" style="margin:12px 0 0;padding-left:18px;color:var(--fg-2)">
         <li>The vendor sees what's missing.</li>

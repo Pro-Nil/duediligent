@@ -21,11 +21,19 @@
 topbar("");
 const caseId = location.pathname.split("/").pop();
 $("print").href = `/report/${caseId}/print`;
-fetch(`/api/case/${caseId}`).then(r => { if (!r.ok) throw new Error("This review was not found."); return r.json(); }).then(c => {
-  document.title = `${c.vendor} · vendor review`;
-  $("title").textContent = c.vendor;
-  renderReport($("result"), c);
-}).catch(e => { $("title").textContent = e.message; });
+let watcher = null;
+function load() {
+  return fetch(`/api/case/${caseId}`).then(r => { if (!r.ok) throw new Error("This review was not found."); return r.json(); }).then(c => {
+    document.title = `${c.vendor} · vendor review`;
+    $("title").textContent = c.vendor;
+    renderReport($("result"), c);
+    markSeen(caseId);
+    if (watcher) clearInterval(watcher);
+    // While this page is open, a vendor upload shows up as a banner and a desktop alert.
+    watcher = watchCase(caseId, c.version || 0, c.vendor, () => load().then(() => window.scrollTo({top: 0, behavior: "smooth"})));
+  }).catch(e => { $("title").textContent = e.message; });
+}
+load();
 </script>
 </body>
 </html>

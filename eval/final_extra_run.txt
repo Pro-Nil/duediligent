@@ -1,19 +1,20 @@
-PASS extra-closed-convoy  REFER TO HUMAN            1/1          8s  REFER TO HUMAN
-PASS extra-lookalike      REFER TO HUMAN            1/1          9s  REFER TO HUMAN
-PASS extra-closed-quibi   REFER TO HUMAN            14/14       18s  REFER TO HUMAN
-PASS extra-ambiguous-mercury REFER TO HUMAN            1/1          9s  REFER TO HUMAN
-PASS extra-small-honest   APPROVE WITH CONDITIONS   20/20       20s  read as Crustdata (YC F24); APPROVE WITH CONDITIONS
-PASS reword-2             APPROVE WITH CONDITIONS   31/31       38s  read as Cloudflare; sensitivity medium; APPROVE WITH CONDITIONS
-PASS reword-1             APPROVE WITH CONDITIONS   31/31       48s  read as Cloudflare; sensitivity medium; APPROVE WITH CONDITIONS
+PASS extra-lookalike      REFER TO HUMAN            1/1          0s  REFER TO HUMAN
+PASS extra-closed-convoy  REFER TO HUMAN            1/1          1s  REFER TO HUMAN
+PASS extra-ambiguous-mercury REFER TO HUMAN            1/1          0s  REFER TO HUMAN
+PASS extra-closed-quibi   REFER TO HUMAN            14/14        2s  REFER TO HUMAN
+PASS extra-small-honest   APPROVE WITH CONDITIONS   20/20       15s  read as Crustdata (YC F24); APPROVE WITH CONDITIONS
+PASS reword-2             APPROVE WITH CONDITIONS   31/31       17s  read as Cloudflare; sensitivity medium; APPROVE WITH CONDITIONS
+PASS reword-3             APPROVE WITH CONDITIONS   31/31        4s  read as Cloudflare; sensitivity low; APPROVE WITH CONDITIONS
+PASS reword-1             APPROVE WITH CONDITIONS   31/31       19s  read as Cloudflare; sensitivity medium; APPROVE WITH CONDITIONS
 PASS extra-acronym-ntro   REFER TO HUMAN            1/1          0s  REFER TO HUMAN
 PASS extra-not-a-review   REFER TO HUMAN            1/1          0s  REFER TO HUMAN
-PASS extra-near-miss-c3ihub APPROVE WITH CONDITIONS   16/16       27s  read as C3iHub, IIT Kanpur; sensitivity high; APPROVE WITH CONDITIONS
-PASS reword-3             APPROVE WITH CONDITIONS   35/35      127s  read as Cloudflare; sensitivity low; APPROVE WITH CONDITIONS
+PASS extra-website-only   APPROVE WITH CONDITIONS   13/13        1s  read as StudioBeam Development; sensitivity medium; APPROVE WITH CONDITIONS
+PASS extra-near-miss-c3ihub APPROVE WITH CONDITIONS   16/16        1s  read as C3iHub, IIT Kanpur; sensitivity high; APPROVE WITH CONDITIONS
 
-11 of 11 passed
+12 of 12 passed
   closed: 2 of 2
   fake: 2 of 2
   honest: 1 of 1
-  near-miss: 2 of 2
+  near-miss: 3 of 3
   reworded: 3 of 3
   scope: 1 of 1

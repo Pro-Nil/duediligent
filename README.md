@@ -130,7 +130,7 @@ We set the targets before building: 15 vendors with labels taken from public rec
 
 The first-run failures were both over-cautious referrals, not wrong answers. The second run used the fixed code, so it isn't an unseen test.
 
-An [extra set](eval/final_extra_run.txt) of 11 cases also passed after the fixes:
+An [extra set](eval/final_extra_run.txt) of 12 cases also passed after the fixes:
 - two closed companies, including Quibi, whose record still says "active"
 - a lookalike domain, `stripe-payments.co`
 - an ambiguous name
@@ -139,10 +139,11 @@ An [extra set](eval/final_extra_run.txt) of 11 cases also passed after the fixes
 - C3iHub, which must not be confused with Cxihub
 - "NTRO", which could be a Finnish firm or India's National Technical Research Organisation, so it asks which one
 - a question about two organisations, which is not a vendor review, so it says so
+- a request that gives only a website, studiobeam.xyz
 
 **Reworded requests:** all three wordings reached the same decision with the same incidents. When the three ran at the same time on an empty cache, the model's reading of pages varied: each run found different incidents, though all reached the same decision. Run one after another, they read the same saved evidence and gave identical results. The model's guess at data sensitivity still varied with wording ("medium" against "low"), which can change the conditions.
 
-**Offline tests:** 43 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
+**Offline tests:** 49 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
 
 **Speed:** a fresh review takes about 1.5 to 4 minutes when the model runs through the `claude` CLI, mostly waiting on the model. A repeat of a cached review takes seconds.
 <!-- /RESULTS -->

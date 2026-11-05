@@ -57,5 +57,17 @@
   "kind": "same_vendor",
   "request": "Can we sign a deal with C3iHub for our cybersecurity backend ? Is the company trusted?",
   "name": "C3iHub, IIT Kanpur"
+ },
+ {
+  "id": "extra-acronym-ntro",
+  "group": "near-miss",
+  "kind": "refer",
+  "request": "Can we buy from NTRO?"
+ },
+ {
+  "id": "extra-not-a-review",
+  "group": "scope",
+  "kind": "refer",
+  "request": "Does ntro and c3ihub have any link ?"
  }
 ]

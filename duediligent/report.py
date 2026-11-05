@@ -237,10 +237,27 @@ ul{padding-left:18px;margin:6px 0}li{margin:4px 0;overflow-wrap:anywhere}li.quot
 .rule{color:var(--mut);font-size:12.5px}.cite{font:12px ui-monospace,monospace;color:var(--accent);text-decoration:none}
 pre{white-space:pre-wrap;background:color-mix(in srgb,var(--line) 35%,transparent);padding:12px;border-radius:6px;font-size:13px}
 li:target{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.bar{position:sticky;top:0;display:flex;gap:10px;align-items:center;max-width:800px;margin:0 auto;padding:12px 16px;background:var(--bg);border-bottom:1px solid var(--line)}
+.bar span{color:var(--mut);font-size:13px}
+.bar button,.bar a{margin-left:auto;padding:8px 14px;border-radius:7px;border:1px solid var(--line);background:var(--fg);color:var(--bg);font:600 14px inherit;cursor:pointer;text-decoration:none}
+.bar a{margin-left:0;background:none;color:var(--fg);font-weight:500}
+@media print{
+  :root{--bg:#fff;--fg:#000;--mut:#444;--line:#bbb;--accent:#000}
+  .bar{display:none}
+  body{font-size:11pt}
+  .report{max-width:none;padding:0}
+  h2{break-after:avoid}
+  li,pre{break-inside:avoid}
+  a{color:inherit;text-decoration:none}
+  @page{margin:16mm}
+}
 """
 
 
-def to_html(r: dict) -> str:
+def to_html(r: dict, back: str | None = None) -> str:
+    bar = ("<div class=bar><span>Printable version. Use Save as PDF in the print dialog to keep a copy.</span>"
+           "<button onclick='window.print()'>Print or save as PDF</button>"
+           + (f"<a href='{html.escape(back)}'>Back to the review</a>" if back else "") + "</div>")
     return (f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
             f"<title>{html.escape(_title(r))} assessment</title><style>{REPORT_CSS}</style>"
-            f"<div class=report>{markdown_body(to_markdown(r))}</div></html>")
+            f"{bar}<div class=report>{markdown_body(to_markdown(r))}</div></html>")

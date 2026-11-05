@@ -20,7 +20,7 @@ from .config import load_env
 from .crust import Crust
 from .watch import ensure_watch
 from .llm import LLM
-from .report import markdown_body, to_markdown
+from .report import markdown_body, to_html, to_markdown
 
 load_env()
 app = FastAPI(title="duediligent")
@@ -105,7 +105,9 @@ def report_page(case_id: str) -> FileResponse:
 
 @app.get("/report/{case_id}/print")
 def report_print(case_id: str) -> HTMLResponse:
-    return HTMLResponse((_case(case_id) / "report.html").read_text(encoding="utf-8"))
+    # Built fresh from the saved review, so older reviews get the current layout and print button.
+    result = json.loads((_case(case_id) / "report.json").read_text(encoding="utf-8"))
+    return HTMLResponse(to_html(result, back=f"/report/{case_id}"))
 
 
 def _case(case_id: str) -> Path:

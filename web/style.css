@@ -307,3 +307,11 @@ table.mini a { color: inherit; text-decoration: none; }
 .topbar .nav { overflow-x: auto; scrollbar-width: none; }
 .topbar .nav::-webkit-scrollbar { display: none; }
 @media (max-width: 1000px) { .topbar .tag { display: none; } }
+
+/* Clarifying answers */
+.choice { display: flex; flex-direction: column; gap: 1px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); text-decoration: none; background: var(--surface-2); }
+.choice:hover { border-color: var(--accent); background: var(--accent-soft); }
+.choice span { font-size: 12.5px; color: var(--mut); }
+form.other { margin-top: 10px; }
+form.other input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--fg); font: 14px var(--sans); }
+.continuing { margin: 0 0 14px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 6px; font-size: 14px; }

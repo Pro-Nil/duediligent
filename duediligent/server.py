@@ -73,6 +73,7 @@ def _structured(r: dict) -> dict:
         "vendor_email": r.get("vendor_email"),
         "watch": r.get("watch"),
         "history": r.get("history") or [],
+        "parent": r.get("parent"),
     }
 
 
@@ -117,6 +118,8 @@ def _case(case_id: str) -> Path:
 def _status(result: dict) -> str:
     """Where the case stands, in the words a reviewer would use."""
     outcome = result["decision"]["outcome"]
+    if any(h.get("kind") == "clarified" for h in result.get("history") or []):
+        return "Done"
     uploads = [h for h in result.get("history") or [] if h.get("kind") == "vendor_upload"]
     if outcome == "REFER TO HUMAN":
         return "Needs a person"
@@ -382,6 +385,39 @@ def run_review(request: str) -> StreamingResponse:
             result = review(request, emit, watch=True)
             events.put({"type": "result", **_summary(result), "elapsed": result["elapsed_seconds"]})
         except Exception as exc:  # noqa: BLE001 - the browser must always hear how a run ended
+            events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+        events.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return _stream(events)
+
+
+@app.get("/api/case/{case_id}/clarify")
+def clarify(case_id: str, name: str = "", domain: str = "") -> StreamingResponse:
+    """The person answered the agent's question. Re-run the review on exactly that company."""
+    folder = _case(case_id)
+    parent = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+    domain = domain.strip().lower().removeprefix("https://").removeprefix("http://").removeprefix("www.").split("/")[0]
+    if not domain and not name.strip():
+        raise HTTPException(400, "Choose a company or enter its website")
+    events: queue.Queue = queue.Queue()
+
+    def emit(level: str, msg: str) -> None:
+        events.put({"type": "log", "level": level, "message": msg})
+
+    def worker() -> None:
+        try:
+            result = review(parent["request"], emit, watch=True,
+                            pinned={"name": name.strip() or None, "domain": domain or None, "parent": case_id})
+            # Link both ways, so each case shows where the other is.
+            parent.setdefault("history", agent_history(parent))
+            parent["history"] = agent_history(parent) + [{
+                "at": result["created_at"], "kind": "clarified", "by": "you", "outcome": result["decision"]["outcome"],
+                "choice": f"{name.strip()} {domain}".strip(), "child": result.get("case_id"),
+                "event": f"You confirmed {name.strip() or domain}"}]
+            (folder / "report.json").write_text(json.dumps(parent, indent=2, default=str), encoding="utf-8")
+            events.put({"type": "result", **_summary(result), "elapsed": result["elapsed_seconds"]})
+        except Exception as exc:  # noqa: BLE001
             events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
         events.put(None)
 

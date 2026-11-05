@@ -69,5 +69,12 @@
   "group": "scope",
   "kind": "refer",
   "request": "Does ntro and c3ihub have any link ?"
+ },
+ {
+  "id": "extra-website-only",
+  "group": "near-miss",
+  "kind": "same_vendor",
+  "request": "I want to get my softwares done through studiobeam.xyz . Are they trusted?",
+  "name": "StudioBeam Development"
  }
 ]

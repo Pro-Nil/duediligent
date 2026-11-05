@@ -78,6 +78,16 @@ def _discover_domain(crust: Crust, store: EvidenceStore, query: str, emit: Emit)
     return None
 
 
+def _options(cands: list[dict]) -> list[dict]:
+    """The companies a person can pick from when the agent will not choose."""
+    seen, out = set(), []
+    for c in cands:
+        if c and c.get("domain") and c["domain"] not in seen:
+            seen.add(c["domain"])
+            out.append({"name": c.get("name"), "domain": c["domain"], "employees": c.get("employees")})
+    return out
+
+
 def _size_rank(employees: str | None) -> int:
     nums = re.findall(r"\d[\d,]*", str(employees or ""))
     return int(nums[0].replace(",", "")) if nums else 0
@@ -98,6 +108,10 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
                 "detail": "This request is not a review of one vendor" + (f" (it also names {others})" if others else "")
                           + ". duediligent reviews one supplier at a time, for example: \"Can we use Acme for our payroll data?\""}
 
+    confirmed = bool(intake.get("confirmed"))
+    if typed and domain and re.fullmatch(r"[\w.-]+\.[a-z]{2,}", typed.strip().lower()):
+        if _compact(typed.split(".")[0]) == _compact(domain.split(".")[0]) or typed.strip().lower().removeprefix("www.") == domain:
+            typed = None
     query = corrected or typed
     stated_domain = domain
     if domain:
@@ -116,8 +130,13 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
     ev = store.add("crustdata", f"Company lookup for {label}", f"crustdata:/company/identify?q={label}",
                    text=json.dumps([_slim(m) for m in matches])[:4000], data=[_slim(m) for m in matches])
     candidates = [c for c in (_slim(m) for m in matches) if c["name"] and c["domain"]]
+    if not candidates and confirmed and domain:
+        # A person vouched for this website, so review it from web evidence even without a company record.
+        emit("warn", f"No company record for {domain}. Reviewing from web evidence only, and the report will say so.")
+        return {"status": "resolved", "input": domain, "name": intake.get("vendor_name") if intake.get("vendor_name") != domain else domain,
+                "domain": domain, "id": None, "assumed": False, "confirmed_by_user": True, "evidence": [ev.id]}
     if not candidates:
-        return {"status": "unresolved", "input": label, "evidence": [ev.id],
+        return {"status": "unresolved", "input": label, "evidence": [ev.id], "options": [],
                 "detail": f"No company record matches \"{label}\". Please supply the vendor's website."}
 
     if domain:
@@ -125,14 +144,14 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
         best = next((c for c in owners if typed and _same_company(query, c["name"])), owners[0] if owners else None)
         if best is None:
             names = ", ".join(f"{c['name']} ({c['domain']})" for c in candidates[:3])
-            return {"status": "unresolved", "input": domain, "evidence": [ev.id],
+            return {"status": "unresolved", "input": domain, "evidence": [ev.id], "options": _options(candidates[:3]),
                     "detail": f"No company record clearly owns {domain}. Nearest records: {names}. Please confirm the vendor's legal name."}
         # The name and website came from the customer, so they must describe one company.
-        if typed and not _same_company(query, best["name"]):
-            return {"status": "unresolved", "input": f"{typed} / {domain}", "evidence": [ev.id],
+        if typed and not confirmed and not _same_company(query, best["name"]):
+            return {"status": "unresolved", "input": f"{typed} / {domain}", "evidence": [ev.id], "options": _options([best]),
                     "detail": f"The request names \"{typed}\", but {domain} belongs to {best['name']}. Please confirm which company you mean."}
         return {"status": "resolved", "input": domain, "name": best["name"], "domain": best["domain"],
-                "id": best["id"], "assumed": False, "evidence": [ev.id]}
+                "id": best["id"], "assumed": False, "confirmed_by_user": confirmed, "evidence": [ev.id]}
 
     # No spelling guesses: a near-miss name is a different company (C3iHub is not Cxihub).
     # A record matches when its name is the query, starts with it ("C3iHub, IIT Kanpur"),
@@ -153,7 +172,7 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
             return resolve_identity(crust, store, {**intake, "domain": found}, emit, _discovered=True)
     if not pool:
         names = ", ".join(f"{c['name']} ({c['domain']})" for c in candidates[:4])
-        return {"status": "unresolved", "input": query, "evidence": [ev.id],
+        return {"status": "unresolved", "input": query, "evidence": [ev.id], "options": _options(candidates[:4]),
                 "detail": f"No confident match for \"{query}\". Nearest records: {names}. Please supply the vendor's website."}
 
     # A record whose website has nothing to do with the name is noise when others match it.
@@ -167,7 +186,7 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
         ranked = sorted(pool, key=lambda c: _size_rank(c["employees"]), reverse=True)
         if _size_rank(ranked[0]["employees"]) < 5 * max(_size_rank(ranked[1]["employees"]), 1):
             names = ", ".join(f"{c['name']} ({c['domain']}, {c['employees'] or 'size unknown'})" for c in ranked[:4])
-            return {"status": "unresolved", "input": query, "evidence": [ev.id], "candidates": ranked[:4],
+            return {"status": "unresolved", "input": query, "evidence": [ev.id], "candidates": ranked[:4], "options": _options(ranked[:4]),
                     "detail": f"\"{query}\" could mean several companies: {names}. Please say which one."}
         pool = ranked[:1]
 
@@ -181,7 +200,7 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
             continue
         rival = next((c for c in others if normalize(c["name"]) == normalize(full) and c["domain"] != best["domain"]), None)
         if rival:
-            return {"status": "unresolved", "input": query, "evidence": [ev.id],
+            return {"status": "unresolved", "input": query, "evidence": [ev.id], "options": _options([best, rival]),
                     "detail": f"\"{query}\" could mean {best['name']} ({best['domain']}) or {rival['name']} ({rival['domain']}). Please say which one, ideally with its website."}
     typo = bool(typed and corrected and normalize(typed) != normalize(corrected))
     if typo:
@@ -191,7 +210,7 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
 
 
 def review(request: str, emit: Emit | None = None, crust: Crust | None = None, llm: LLM | None = None, save: bool = True,
-           watch: bool = False) -> dict:
+           watch: bool = False, pinned: dict | None = None) -> dict:
     emit = emit or (lambda level, msg: None)
     started = time.time()
     store = EvidenceStore()
@@ -201,6 +220,12 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
 
     emit("step", "Reading the request")
     intake = extract.parse_request(llm, request)
+    if pinned:
+        # A person answered the agent's question, so use exactly the company they chose.
+        intake.update({"vendor_name": pinned.get("name") or pinned.get("domain"), "domain": pinned.get("domain"),
+                       "corrected_name": None, "request_type": "vendor_review", "other_companies": [], "full_names": [],
+                       "confirmed": True})
+        emit("info", f"Using the company you confirmed: {pinned.get('name') or ''} {pinned.get('domain') or ''}".strip())
     sensitivity = intake["data_sensitivity"]
     emit("info", f"Vendor: {intake.get('vendor_name') or intake.get('domain') or 'not stated'}. Data sensitivity: {sensitivity}.")
 
@@ -317,7 +342,10 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
         "api_calls": len(crust.calls),
         "ctx": ctx,
     }
-    result["history"] = [{"at": result["created_at"], "kind": "review", "by": "agent", "outcome": decision.outcome, "event": "Review completed"}]
+    result["history"] = [{"at": result["created_at"], "kind": "review", "by": "agent", "outcome": decision.outcome,
+                          "event": "Review completed after your answer" if pinned else "Review completed"}]
+    if pinned:
+        result["parent"] = pinned.get("parent")
     result["vendor_email"] = report.vendor_email(result)
     if watch and decision.outcome == policy.APPROVE and ctx["identity"].get("domain"):
         result["watch"] = watch_mod.ensure_watch(crust, ctx["identity"]["domain"])

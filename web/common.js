@@ -337,6 +337,7 @@ function renderReport(root, s, opts = {}) {
       ${badge(d.outcome)}
     </div>
     <p class="verdict-line">${esc(summarySentence(s))}</p>
+    ${rep.parent ? `<p class="small mut" style="margin:6px 0 0">Re-run after you confirmed the company. <a href="/report/${esc(rep.parent)}">See the original question</a></p>` : ""}
     <div class="quote"><span class="eyebrow">Your request</span><br>“${esc(rep.request)}”</div>
     <div class="stats">
       <div class="stat" title="Every claim and every reason was re-checked against the saved source. This is how many passed."><b>${rep.audit.verified}/${rep.audit.total}</b><span>Citations verified</span></div>
@@ -381,6 +382,11 @@ function renderReport(root, s, opts = {}) {
   </div>`;
 
   root.querySelectorAll(".tabs button").forEach(b => b.onclick = () => showTab(root, b.dataset.tab));
+  root.querySelectorAll("form.other").forEach(f => f.onsubmit = e => {
+    e.preventDefault();
+    const d = f.domain.value.trim();
+    if (d) location.href = `/new?clarify=${encodeURIComponent(f.dataset.case)}&domain=${encodeURIComponent(d)}`;
+  });
   root.onclick = e => {
     const c = e.target.closest(".cite");
     if (c) openSource(c.dataset.ev, rep, idx);
@@ -430,7 +436,28 @@ function nextCard(s, opts) {
       <p class="mut small" style="margin:0">Crustdata watch #${esc(w.watch_id)} checks weekly for news and headcount changes, and alerts ${esc(w.email)}.</p></section>`;
   }
   if (w) return `<section class="card next fade"><div class="eyebrow">Monitoring</div><p class="mut small" style="margin:4px 0 0">Not set up: ${esc(w.reason)}</p></section>`;
-  if (out === "REFER TO HUMAN") return `<section class="card next fade"><div class="eyebrow">Next step</div><h3 style="margin-top:4px">A person decides</h3><p class="mut small" style="margin:0">The agent stopped rather than guess. The reason is on the left.</p></section>`;
+  if (out === "REFER TO HUMAN") {
+    const hist = s.report?.history || [];
+    const done = hist.find(h => h.kind === "clarified");
+    if (done) return `<section class="card next"><div class="eyebrow">Answered</div><h3 style="margin-top:4px">You confirmed ${esc(done.choice)}</h3>
+      <p class="small mut" style="margin:0 0 10px">The agent re-ran the review on that company.</p>
+      ${done.child ? `<a class="btn sm" href="/report/${esc(done.child)}">Open the new review</a>` : ""}</section>`;
+    const id = s.report?.identity || {};
+    const isIdentity = (s.report?.decision?.referrals || []).some(r => r.rule.startsWith("R1"));
+    if (isIdentity && s.case_id && !/not a review of one vendor/.test(id.detail || "")) {
+      const opts = id.options || [];
+      const go = (name, domain) => `/new?clarify=${encodeURIComponent(s.case_id)}&name=${encodeURIComponent(name || "")}&domain=${encodeURIComponent(domain || "")}`;
+      return `<section class="card next" id="clarify"><div class="eyebrow">Next step · your answer</div>
+        <h3 style="margin-top:4px">Help the agent decide</h3>
+        <p class="small" style="margin:0 0 10px;color:var(--fg-2)">It wasn't sure which company you mean, so it didn't guess. Pick one, and it reviews that company in full.</p>
+        ${opts.map(o => `<a class="choice" href="${go(o.name, o.domain)}"><b>${esc(o.name)}</b><span>${esc(o.domain)}${o.employees ? ` · ${/\d/.test(o.employees) ? esc(o.employees) + " staff" : /myself/i.test(o.employees) ? "one person" : esc(o.employees)}` : ""}</span></a>`).join("")}
+        <form class="other" data-case="${esc(s.case_id)}">
+          <label class="small mut" for="other-domain">${opts.length ? "None of these? " : ""}Enter the vendor's website</label>
+          <div class="row" style="margin-top:4px"><input id="other-domain" name="domain" placeholder="vendor.com" required><button class="btn sm" type="submit">Review it</button></div>
+        </form></section>`;
+    }
+    return `<section class="card next"><div class="eyebrow">Next step</div><h3 style="margin-top:4px">A person decides</h3><p class="mut small" style="margin:0">The agent stopped rather than guess. The reason is on the left.</p></section>`;
+  }
   return "";
 }
 

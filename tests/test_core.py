@@ -349,3 +349,45 @@ def test_undated_reports_sharing_a_figure_join_the_dated_report():
     c = Finding("incident", "A cyber-criminal claimed to have compromised Capgemini and stolen 20GB of data including databases", "E3", quote="q3", attrs={"date": None})
     merged = extract.merge_incidents([a, b, c])
     assert len(merged) == 1 and set(merged[0]["evidence"]) == {"E1", "E2", "E3"}
+
+
+class DomainCrust(ListCrust):
+    def identify(self, name=None, domain=None):
+        self.rows = [("StudioBeam Development", "studiobeam.xyz", "2-10")] if domain == "studiobeam.xyz" else []
+        return super().identify(name, domain)
+
+
+def _resolve_domain(intake):
+    import duediligent.collect as collect_mod
+    from duediligent.agent import resolve_identity
+    original = collect_mod.canonical_domain
+    collect_mod.canonical_domain = lambda d: d
+    try:
+        return resolve_identity(DomainCrust([]), EvidenceStore(), intake, lambda *a: None)
+    finally:
+        collect_mod.canonical_domain = original
+
+
+def test_a_typed_website_is_not_a_conflicting_name():
+    r = _resolve_domain({"vendor_name": "studiobeam.xyz", "domain": "studiobeam.xyz"})
+    assert r["status"] == "resolved" and r["name"] == "StudioBeam Development"
+
+
+def test_a_real_name_conflict_offers_the_owner_as_a_choice():
+    r = _resolve_domain({"vendor_name": "Acme Bank", "domain": "studiobeam.xyz"})
+    assert r["status"] == "unresolved" and r["options"][0]["domain"] == "studiobeam.xyz"
+
+
+def test_a_confirmed_answer_skips_the_conflict_check():
+    r = _resolve_domain({"vendor_name": "Acme Bank", "domain": "studiobeam.xyz", "confirmed": True})
+    assert r["status"] == "resolved" and r["confirmed_by_user"]
+
+
+def test_a_confirmed_website_without_a_record_is_reviewed_from_the_web():
+    r = _resolve_domain({"vendor_name": "tinyvendor.io", "domain": "tinyvendor.io", "confirmed": True})
+    assert r["status"] == "resolved" and r["id"] is None
+
+
+def test_ambiguous_names_offer_every_candidate():
+    r = resolve([("Mercury", "mercury.com", "1001-5000"), ("Mercury", "mercuryeng.com", "1001-5000")], "Mercury")
+    assert {o["domain"] for o in r["options"]} == {"mercury.com", "mercuryeng.com"}

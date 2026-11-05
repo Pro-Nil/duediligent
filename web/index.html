@@ -59,15 +59,13 @@ if (pre) { $("q").value = pre; $("q").focus(); }
 document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; $("q").focus(); });
 $("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("go").click(); });
 
-$("go").onclick = () => {
-  const request = $("q").value.trim();
-  if (!request) { $("q").focus(); return; }
+function runStream(url) {
   $("go").disabled = true; $("go").textContent = "Reviewing…";
   $("result").innerHTML = ""; $("feed").innerHTML = ""; $("run").classList.remove("hide");
   document.querySelectorAll(".how, details.help").forEach(el => el.classList.add("hide"));
   const stages = makeStages($("steps"));
   const line = (t, cls) => { const d = document.createElement("div"); d.className = cls || ""; d.textContent = t; $("feed").appendChild(d); $("feed").scrollTop = 1e9; };
-  const es = new EventSource("/api/review?request=" + encodeURIComponent(request));
+  const es = new EventSource(url);
   const finish = () => { es.close(); $("go").disabled = false; $("go").textContent = "Review vendor"; };
   es.onmessage = e => {
     const m = JSON.parse(e.data);
@@ -81,6 +79,7 @@ $("go").onclick = () => {
       renderReport($("result"), m);
       if (m.case_id) {
         markSeen(m.case_id);
+        history.replaceState(null, "", `/report/${m.case_id}`);
         // Keep listening: if the vendor uploads while this page is open, say so.
         watchCase(m.case_id, 0, m.vendor, () => { location.href = `/report/${m.case_id}`; });
       }
@@ -89,7 +88,26 @@ $("go").onclick = () => {
     }
   };
   es.onerror = () => { line("Connection lost.", "warn"); finish(); };
+}
+
+$("go").onclick = () => {
+  const request = $("q").value.trim();
+  if (!request) { $("q").focus(); return; }
+  runStream("/api/review?request=" + encodeURIComponent(request));
 };
+
+// Arriving from "Help the agent decide": show the answer, then continue the review on that company.
+const params = new URLSearchParams(location.search);
+if (params.get("clarify")) {
+  const caseId = params.get("clarify"), name = params.get("name") || "", domain = params.get("domain") || "";
+  fetch(`/api/case/${encodeURIComponent(caseId)}`).then(r => r.json()).then(c => {
+    $("q").value = c.report?.request || "";
+    $("q").readOnly = true;
+    document.querySelector(".lede h1").textContent = "Continuing the review";
+    document.querySelector(".lede p").innerHTML = `You answered the agent's question: <b>${esc(name || domain)}</b>${name && domain ? ` (${esc(domain)})` : ""}. It is now reviewing exactly that company. <a href="/report/${esc(caseId)}">See the original question</a>`;
+    runStream(`/api/case/${encodeURIComponent(caseId)}/clarify?name=${encodeURIComponent(name)}&domain=${encodeURIComponent(domain)}`);
+  });
+}
 </script>
 </body>
 </html>

@@ -17,7 +17,10 @@ From a single request, with no one stepping in, it:
 3. **Gathers evidence**: the Crustdata company record, web and news search, the vendor's own trust pages, the Have I Been Pwned breach catalogue, and passive checks (TLS, HSTS, SPF, DMARC, security.txt).
 4. **Extracts facts** with a model, then keeps a fact only if its quote appears word for word on the saved page.
 5. **Decides with a fixed rulebook** in [policy.py](duediligent/policy.py). The model never makes the call, so a page that says "approve this vendor" can't change the result.
-6. **Finishes the work**: a report with citations, plus a draft information request for the vendor.
+6. **Finishes the work**: a report with citations, and a decision.
+7. **Chases what's missing.** When the decision has conditions, it gives you a link for the vendor. The vendor uploads an audit report: a SOC 2 Type II report, a SOC 3 report or an ISO 27001 certificate. The agent reads the PDF and checks four things, each quoted and cited to its page: the organisation, the audit period, the auditor and the opinion. It then decides again. A report that is out of date, qualified, for another company, or missing any of those four is not accepted.
+8. **Keeps watching.** When a vendor is approved, it creates a Crustdata watch on the vendor's domain, once per vendor, so new news or a headcount change triggers a fresh review.
+9. **Reviews a whole supplier list.** Upload a CSV and get a register ranked by risk, with a report and vendor link for each row.
 
 ### Where it still needs a person
 
@@ -31,10 +34,10 @@ It refers a case instead of guessing when:
 
 ### What it does not do
 
-- It sees a vendor's certification claim, not the audit report, and the report says so.
+- Without an uploaded audit report, it only sees the vendor's certification claim, and the report says so.
 - "No public breach found" never means "no breach", and the report says that too.
 - It only does passive checks. It never scans a vendor's systems or tries to get past a bot check. A blocked page is listed as unread.
-- It never sends the vendor email. It writes a draft for a person to send.
+- It never contacts the vendor itself. You send the vendor the link, following the event rule that agents only talk to your own team.
 
 ## How it's built
 
@@ -56,14 +59,19 @@ flowchart TD
     F --> G[Quote check: exact match against snapshot]
     G --> I[Rulebook: deterministic decision]
     I --> J[Citation audit]
-    J --> K[Report and draft vendor email]
+    J --> K[Report]
     I -->|Rule says exception| H
+    I -->|Conditions| V[Vendor link: upload audit report]
+    V --> W[Read PDF, verify quotes per page]
+    W --> I
+    I -->|Approve| X[Crustdata watch on the vendor]
+    X -->|News or headcount change| A
 ```
 
 | Part | Detail |
 |---|---|
 | Models | `claude-sonnet-5-5` through the Anthropic API, or the signed-in `claude` CLI if no key is set. Used only to parse requests and extract facts. |
-| Crustdata | `/company/identify`, `/company/enrich`, `/web/search/live`, `/web/enrich/live` |
+| Crustdata | `/company/identify`, `/company/enrich`, `/web/search/live`, `/web/enrich/live`, `/watch/company` |
 | Other data | Have I Been Pwned public breach list, DNS, TLS and HTTP headers |
 | State | Saved snapshots and reports in `runs/`, and a 24-hour disk cache in `.cache/`, so a crashed run resumes without paying twice |
 | Runs on | Python, FastAPI and a local web page, or a command line |
@@ -77,7 +85,7 @@ flowchart TD
 | What if two sources disagree? | It refers the case and cites both, as with an "active" record for a closed company. |
 | What if a tool fails? | Calls retry with backoff and respect rate limits. If searches still fail, it refers the case rather than approving on missing data. |
 | Does the same case, worded another way, get the same answer? | In our test, yes: three wordings reached the same decision. The rulebook is deterministic and the cache keeps the evidence fixed, but the model's guess at data sensitivity can vary with wording. |
-| How does it avoid sending twice? | It never sends anything. |
+| How does it avoid sending twice? | It sends nothing itself. It creates at most one Crustdata watch per vendor domain, recorded in `runs/watches.json`, so a re-run never creates a second one. |
 | Could a customer trust this without watching it run? | Each report lists its sources with timestamps, and `evidence.json` holds the saved text and hashes. |
 
 ## The approaches we tried
@@ -132,7 +140,7 @@ An [extra set](eval/final_extra_run.txt) of 11 cases also passed after the fixes
 
 **Reworded requests:** all three wordings reached the same decision with the same incidents. When the three ran at the same time on an empty cache, the model's reading of pages varied: each run found different incidents, though all reached the same decision. Run one after another, they read the same saved evidence and gave identical results. The model's guess at data sensitivity still varied with wording ("medium" against "low"), which can change the conditions.
 
-**Offline tests:** 36 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
+**Offline tests:** 43 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
 
 **Speed:** a fresh review takes about 1.5 to 4 minutes when the model runs through the `claude` CLI, mostly waiting on the model. A repeat of a cached review takes seconds.
 <!-- /RESULTS -->
@@ -141,7 +149,7 @@ The test set is in [eval/cases.json](eval/cases.json), and the offline tests are
 
 ## What we left out to ship in eight hours
 
-- **Audit reports:** it doesn't read SOC 2 reports, only the claims on a vendor's pages.
+- **Audit report depth:** it checks a report's organisation, period, auditor, opinion and listed exceptions, but not whether its scope covers the exact service being bought.
 - **Questionnaires:** it doesn't run a security questionnaire with the vendor, because the event rules keep agents from contacting outside people.
 - **Customer rules:** it has one rulebook, not one per customer.
 - **Registries:** it doesn't check government company registers.
@@ -149,8 +157,8 @@ The test set is in [eval/cases.json](eval/cases.json), and the offline tests are
 
 ## What it could do in the future
 
-- **Watch approved vendors.** Crustdata Watchers could trigger a re-review when a CISO leaves or a breach is reported. Not now, because a one-time review has to be right first.
-- **Read real audit reports.** Parse SOC 2 PDFs for scope and exceptions. Not now, because they sit behind NDAs and we have none to test with.
+- **Re-review automatically on an alert.** Watch alerts go to email today. A webhook could start the new review itself. Not now, because it needs a public server.
+- **Match report scope to the service.** Check that the audited system covers what is being bought. Not now, because it needs a model of each service.
 - **Send and track questionnaires.** Not now, because the event rules keep agents from contacting outside people.
 - **Check government registries.** Add company registers to catch shell companies. Not now, because each country needs its own integration.
 - **Customer rulebooks.** Let each company edit its own rules. Not now, because one sound default comes first.
@@ -167,13 +175,13 @@ python -m venv .venv
 cp .env.example .env
 ```
 
-Add `CRUSTDATA_API_KEY` to `.env`. `ANTHROPIC_API_KEY` is optional if you're signed in to the `claude` CLI.
+Add `CRUSTDATA_API_KEY` to `.env`, and `WATCH_EMAIL` if you want change alerts for approved vendors. `ANTHROPIC_API_KEY` is optional if you're signed in to the `claude` CLI.
 
 ```bash
 .venv/Scripts/python -m duediligent.server
 ```
 
-Then open http://localhost:8765. Or use the command line:
+Then open http://localhost:8765, or http://localhost:8765/batch for a vendor list. Or use the command line:
 
 ```bash
 .venv/Scripts/python -m duediligent "We want to store customer data in Notion. Is it safe?"

@@ -12,6 +12,7 @@ import dns.resolver
 import httpx
 from bs4 import BeautifulSoup
 
+from . import cache
 from .crust import Crust, CrustError
 from .evidence import EvidenceStore, Finding, dig, normalize
 
@@ -55,11 +56,16 @@ def resolve_links(rows: list[dict]) -> None:
         url = row.get("url") or ""
         if "google.com/goto" not in url:
             return
+        hit = cache.get("links", url)
+        if hit is not cache.MISS:
+            row["url"] = hit
+            return
         try:
             with httpx.Client(timeout=12, follow_redirects=True, headers=UA) as client:
                 with client.stream("GET", url) as resp:
                     final = str(resp.url)
             row["url"] = None if "google.com" in registered(final) else final
+            cache.put("links", url, row["url"])
         except httpx.HTTPError:
             row["url"] = None
 

@@ -165,6 +165,8 @@ def _inline(text: str, ev_links: bool = True) -> str:
     text = re.sub(r"(?<!\*)\*([^*]+)\*", r"<em>\1</em>", text)
     if ev_links:
         text = re.sub(r"\[(E\d+)\]", r'<a class="cite" href="#\1">\1</a>', text)
+    # Sources open in a new tab, so anyone can check a claim against the live page.
+    text = re.sub(r"(?<![\"'=])(https?://[^\s|<]+)", r'<a href="\1" target="_blank" rel="noopener">\1</a>', text)
     return text
 
 

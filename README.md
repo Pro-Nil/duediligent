@@ -76,7 +76,7 @@ flowchart TD
 | What if the run crashes halfway? | Finished API and model calls are cached, so a re-run picks up from there. |
 | What if two sources disagree? | It refers the case and cites both, as with an "active" record for a closed company. |
 | What if a tool fails? | Calls retry with backoff and respect rate limits. If searches still fail, it refers the case rather than approving on missing data. |
-| Does the same case, worded another way, get the same answer? | The rulebook is deterministic and the cache keeps the evidence fixed. Parsed data sensitivity can still vary with wording. |
+| Does the same case, worded another way, get the same answer? | In our test, yes: three wordings reached the same decision. The rulebook is deterministic and the cache keeps the evidence fixed, but the model's guess at data sensitivity can vary with wording. |
 | How does it avoid sending twice? | It never sends anything. |
 | Could a customer trust this without watching it run? | Each report lists its sources with timestamps, and `evidence.json` holds the saved text and hashes. |
 
@@ -96,17 +96,51 @@ These bugs only appeared against real data:
 - **A closed company marked active.** Quibi shut down in 2020, but its record says "active" with 74 staff. We added a closure search, and a disagreement now goes to a person.
 - **Bot-check screens read as pages.** A Cloudflare screen came back as a successful fetch. These are now listed as unread.
 - **Search redirect links.** Results came back as `google.com/goto` links, which would have made useless citations. They are now resolved to the real page.
-- **Self-reported founders.** Strangers list themselves as "Founder" of a well-known company. The report ranks people by CEO title and audience, and labels them as self-reported.
+- **Self-reported leaders.** Strangers list themselves as "CEO" or "Founder" of a well-known company; Datadog's record had several. Ranking by title and audience wasn't enough, so a person now appears only when an independent web search also names them. For Asana it now names Dan Rogers, the CEO, and Justin Rosenstein, a co-founder, and leaves out the rest.
+- **One breach, two dates.** Reports date a breach by when it was discovered or when it was disclosed, so PowerSchool, CircleCI, Zapier and Dropbox Sign each showed one breach twice. Reports within two months of each other are now merged.
+- **Over-cautious identity checks.** "GitLab SaaS" was read as a company name, and a junk `HUBSPOT` record at an unrelated domain blocked HubSpot. Both are fixed, while two real companies sharing a name, such as Mercury, still go to a person.
 - **A record that disagrees with itself.** One record showed 7,164 staff and a 501–1000 size band. The report now flags this.
 - **Model ignoring its instructions.** A multi-line system prompt passed as a Windows command argument was cut off. The prompt now goes through a file, and replies are checked for the required fields.
 
 ## How we tested it
 
 <!-- RESULTS -->
-Results are being added.
+We set the targets before building: 15 vendors with labels taken from public records and the vendors' own pages. The agent must flag every known breach, find every published certification, never guess on a messy input, and have every citation check out.
+
+| Run | Breaches | Certifications | Messy inputs | Citations verified |
+|---|---|---|---|---|
+| [First run](eval/first_run.txt), before any fixes | 5 of 5 | 4 of 5 | 4 of 5 | All |
+| [After fixes](eval/second_run.txt) | 5 of 5 | 5 of 5 | 5 of 5 | All |
+
+- **Breaches:** Okta, Twilio, CircleCI, Dropbox Sign, PowerSchool
+- **Certifications:** Datadog, GitLab, Asana, Zapier, Figma
+- **Messy inputs:** a misspelled name, a name shared by many companies, a dead company, a name that doesn't match its website, and a company that doesn't exist
+
+The first-run failures were both over-cautious referrals, not wrong answers. The second run used the fixed code, so it isn't an unseen test.
+
+An [extra set](eval/extra_run.txt) of 8 cases also passed after the fixes:
+- two closed companies, including Quibi, whose record still says "active"
+- a lookalike domain, `stripe-payments.co`
+- an ambiguous name
+- a small, honest company, Crustdata itself. It got conditions, not a rejection.
+- one vendor asked three different ways
+
+**Reworded requests:** all three wordings reached the same decision with the same incidents. When the three ran at the same time on an empty cache, the model's reading of pages varied: each run found different incidents, though all reached the same decision. Run one after another, they read the same saved evidence and gave identical results. The model's guess at data sensitivity still varied with wording ("medium" against "low"), which can change the conditions.
+
+**Offline tests:** 31 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
+
+**Speed:** a fresh review takes about 1.5 to 4 minutes when the model runs through the `claude` CLI, mostly waiting on the model. A repeat of a cached review takes seconds.
 <!-- /RESULTS -->
 
 The test set is in [eval/cases.json](eval/cases.json), and the offline tests are in [tests/test_core.py](tests/test_core.py).
+
+## What we left out to ship in eight hours
+
+- **Audit reports:** it doesn't read SOC 2 reports, only the claims on a vendor's pages.
+- **Questionnaires:** it doesn't run a security questionnaire with the vendor, because the event rules keep agents from contacting outside people.
+- **Customer rules:** it has one rulebook, not one per customer.
+- **Registries:** it doesn't check government company registers.
+- **Live UI test:** the web UI shows progress and the report, but has no login or saved history.
 
 ## What it could do in the future
 

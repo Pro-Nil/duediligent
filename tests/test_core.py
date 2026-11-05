@@ -87,6 +87,12 @@ def test_failed_searches_refer_rather_than_approve():
     assert policy.evaluate(ctx, TODAY).outcome == policy.REFER
 
 
+def test_active_record_but_reported_closure_is_referred():
+    ctx = base_ctx(closures=[{"summary": "Quibi shut down.", "date": "2020-12", "evidence": ["E6"]}], stability={"evidence": ["E4"]})
+    d = policy.evaluate(ctx, TODAY)
+    assert d.outcome == policy.REFER and "E6" in d.referrals[0].evidence and "E4" in d.referrals[0].evidence
+
+
 def test_closed_company_is_rejected():
     ctx = base_ctx(stability={"closed": True, "closed_detail": "closed", "evidence": ["E4"]})
     assert policy.evaluate(ctx, TODAY).outcome == policy.REJECT

@@ -17,6 +17,9 @@ from .evidence import EvidenceStore, Finding, dig, normalize
 
 BREACH_WORDS = re.compile(r"breach|hack|compromis|ransomware|leak|exposed|stolen|cyberattack|cyber attack|incident|intrusion|unauthori[sz]ed", re.I)
 CERT_WORDS = re.compile(r"soc\s*2|iso\s*27001|trust|security|compliance|certif", re.I)
+CLOSURE_WORDS = re.compile(r"shut(s|ting)? down|shutdown|ceas(e|ed|es|ing) operations|out of business|bankrupt|insolven|liquidat|wind(ing|s)? down|closed its doors", re.I)
+SECURITY_TITLE = re.compile(r"\bciso\b|chief (information )?security|head of (information |cyber)?security|vp,? (of )?(information )?security", re.I)
+BLOCK_PAGE = re.compile(r"attention required|just a moment|access denied|verify you are human|are you a robot|enable javascript and cookies", re.I)
 TRUST_PATHS = ["/security", "/trust", "/compliance", "/legal/security"]
 TRUST_HOSTS = ["trust", "security"]
 UA = {"User-Agent": "duediligent-vendor-review/0.1"}
@@ -32,6 +35,36 @@ def html_to_text(html: str) -> str:
 
 def registered(url: str) -> str:
     return re.sub(r"^www\.", "", urlparse(url).netloc.lower())
+
+
+def canonical_domain(domain: str) -> str:
+    """Where the vendor's own website lands. Falls back to the given domain."""
+    try:
+        with httpx.Client(timeout=12, follow_redirects=True, headers=UA) as client:
+            with client.stream("GET", f"https://{domain}/") as resp:
+                host = registered(str(resp.url))
+                # A marketing subdomain still belongs to the same registered name.
+                return host if host else domain
+    except httpx.HTTPError:
+        return domain
+
+
+def resolve_links(rows: list[dict]) -> None:
+    """Search results can hold redirect links. A citation must name the real page."""
+    def one(row: dict) -> None:
+        url = row.get("url") or ""
+        if "google.com/goto" not in url:
+            return
+        try:
+            with httpx.Client(timeout=12, follow_redirects=True, headers=UA) as client:
+                with client.stream("GET", url) as resp:
+                    final = str(resp.url)
+            row["url"] = None if "google.com" in registered(final) else final
+        except httpx.HTTPError:
+            row["url"] = None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(one, rows))
 
 
 def fetch_pages(crust: Crust, store: EvidenceStore, urls: list[str], log) -> tuple[list[str], list[str]]:
@@ -55,7 +88,8 @@ def fetch_pages(crust: Crust, store: EvidenceStore, urls: list[str], log) -> tup
                 continue
             seen.add(url)
             text = html_to_text(row["content"])
-            if len(text) < 200:  # empty shells: JavaScript-only pages and block screens
+            # Empty shells and bot-check screens hold no facts. We report them, not bypass them.
+            if len(text) < 200 or BLOCK_PAGE.search(str(row.get("title") or "")):
                 failed.append(url)
                 continue
             ev_ids.append(store.add("web_page", row.get("title") or url, url, text=text).id)
@@ -96,11 +130,10 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
         people = dig(company, f"people.{group}") or []
         if not isinstance(people, list):
             continue
-        for i, person in enumerate(people[:200]):
-            title = str((person or {}).get("title") or "") if isinstance(person, dict) else ""
-            if re.search(r"\bciso\b|chief (information )?security|head of security|vp,? (of )?security", title, re.I):
-                fact(f"people.{group}.{i}.title", "Security leader on record")
-                break
+        hit = next((i for i, p in enumerate(people[:300]) if SECURITY_TITLE.search(str(dig(p, "basic_profile.current_title") or ""))), None)
+        if hit is not None:
+            fact(f"people.{group}.{hit}.basic_profile.name", f"Security leader on record ({dig(people[hit], 'basic_profile.current_title')})", "leader")
+            break
 
     # Who runs it: names as held on the company record.
     seen_people: set[str] = set()
@@ -109,14 +142,11 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
         if not isinstance(people, list):
             continue
         for i, person in enumerate(people[:30]):
-            for key in ("basic_profile.name", "name"):
-                who = dig(person, key) if isinstance(person, dict) else None
-                if who:
-                    if who not in seen_people and len(seen_people) < 6:
-                        seen_people.add(who)
-                        role = "Founder" if group == "founders" else "Executive"
-                        fact(f"people.{group}.{i}.{key}", role, "leader")
-                    break
+            who = dig(person, "basic_profile.name")
+            if who and who not in seen_people and len(seen_people) < 6:
+                seen_people.add(who)
+                title = dig(person, "basic_profile.current_title") or ("Founder" if group == "founders" else "Executive")
+                fact(f"people.{group}.{i}.basic_profile.name", str(title)[:90], "leader")
 
     closed = isinstance(status, str) and bool(re.search(r"closed|defunct|inactive|out of business|dissolved", status, re.I))
     flags = []
@@ -253,8 +283,10 @@ def gather_web(crust: Crust, store: EvidenceStore, name: str, domain: str, news:
             "web": pool.submit(_safe_search, crust, store, log, f'"{name}" breach disclosure security incident', ["web"]),
             "cert": pool.submit(_safe_search, crust, store, log, f'"{name}" SOC 2 ISO 27001 trust center', ["web"]),
             "site": pool.submit(_safe_search, crust, store, log, "security compliance SOC 2 ISO 27001", ["web"], domain),
+            "closure": pool.submit(_safe_search, crust, store, log, f'"{name}" shut down ceased operations bankruptcy', ["news"]),
         }
         out = {k: j.result() for k, j in jobs.items()}
+    resolve_links([r for rows, _ in out.values() for r in rows])
 
     search_ev = [e for _, e in out.values() if e]
     needle = normalize(name)
@@ -271,6 +303,10 @@ def gather_web(crust: Crust, store: EvidenceStore, name: str, domain: str, news:
             if item.get("article_url") and needle in normalize(title) and BREACH_WORDS.search(title):
                 breach_urls.append(item["article_url"])
 
+    closure_urls = [r["url"] for r in out["closure"][0]
+                    if r.get("url") and needle in normalize(f"{r.get('title')} {r.get('snippet')}") and CLOSURE_WORDS.search(f"{r.get('title')} {r.get('snippet')}")][:3]
+    breach_urls = closure_urls + breach_urls
+
     trust_urls = [f"https://{domain}{p}" for p in TRUST_PATHS] + [f"https://{h}.{domain}/" for h in TRUST_HOSTS]
     for r in out["site"][0]:
         if r.get("url"):
@@ -282,7 +318,7 @@ def gather_web(crust: Crust, store: EvidenceStore, name: str, domain: str, news:
         if url and registered(url).endswith(domain) and CERT_WORDS.search(blob):
             trust_urls.append(url)
     trust_urls = list(dict.fromkeys(trust_urls))[:10]
-    breach_urls = list(dict.fromkeys(breach_urls))[:8]
+    breach_urls = list(dict.fromkeys(breach_urls))[:10]
 
     log("step", f"Reading {len(trust_urls)} vendor pages and {len(breach_urls)} incident reports")
     trust_ev, trust_failed = fetch_pages(crust, store, trust_urls, log)

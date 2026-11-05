@@ -65,6 +65,14 @@ def evaluate(ctx: dict, today: date | None = None) -> Decision:
         d.reasons.append(Reason("R2 viability", stab.get("closed_detail") or "The company appears to have stopped operating.", stab.get("evidence") or []))
         d.outcome = REJECT
         return d
+    # When the record says active and the press says closed, the sources disagree: show both to a person.
+    closures = ctx.get("closures") or []
+    if closures:
+        ev = sorted({e for c in closures for e in c.get("evidence", [])}) + list(stab.get("evidence") or [])
+        first = closures[0]
+        d.referrals.append(Reason("R2 viability", f"Sources disagree on whether this company still operates. Reports say: {first['summary']} The company record may be out of date, so a person should confirm before any contract.", ev))
+        d.outcome = REFER
+        return d
     if cov.get("site_reachable") is False:
         d.referrals.append(Reason("R2 viability", f"The vendor's website {identity.get('domain')} could not be reached, so its current status is unclear.", cov.get("site_evidence") or []))
         d.outcome = REFER

@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 from . import cache
 
@@ -62,18 +64,24 @@ class LLM:
             except Exception as exc:  # noqa: BLE001 - every SDK failure is handled the same way
                 raise LLMError(f"model call failed: {exc}") from exc
             return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
-        try:
-            proc = subprocess.run(
-                [self.cli, "-p", "--model", "sonnet", "--tools", "", "--system-prompt", system],
-                input=user, capture_output=True, text=True, encoding="utf-8", timeout=240,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise LLMError(f"claude CLI failed: {exc}") from exc
+        # A prompt file keeps line breaks intact on Windows. The neutral working folder and
+        # empty setting sources stop personal memory and project files reaching the model.
+        with tempfile.TemporaryDirectory(prefix="duediligent-") as tmp:
+            prompt_file = Path(tmp) / "system.txt"
+            prompt_file.write_text(system, encoding="utf-8")
+            try:
+                proc = subprocess.run(
+                    [self.cli, "-p", "--model", "sonnet", "--tools", "", "--system-prompt-file", str(prompt_file),
+                     "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands"],
+                    input=user, capture_output=True, text=True, encoding="utf-8", timeout=240, cwd=tmp,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise LLMError(f"claude CLI failed: {exc}") from exc
         if proc.returncode != 0:
             raise LLMError(f"claude CLI exited {proc.returncode}: {proc.stderr[:300]}")
         return proc.stdout
 
-    def json(self, system: str, user: str, max_tokens: int = 2000, retries: int = 1) -> dict:
+    def json(self, system: str, user: str, max_tokens: int = 2000, retries: int = 1, required: tuple[str, ...] = ()) -> dict:
         cached = cache.get("llm", [system, user])
         if cached is not cache.MISS:
             return cached
@@ -82,6 +90,9 @@ class LLM:
         for _ in range(retries + 1):
             try:
                 result = parse_json(self.complete(system, prompt, max_tokens))
+                missing = [k for k in required if k not in result]
+                if missing:
+                    raise LLMError(f"model reply is missing {missing}")
                 cache.put("llm", [system, user], result)
                 return result
             except LLMError as exc:

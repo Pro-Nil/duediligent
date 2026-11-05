@@ -30,15 +30,15 @@ def _slim(match: dict) -> dict:
         "id": dig(match, "company_data.crustdata_company_id"),
         "name": info.get("name"),
         "domain": info.get("primary_domain"),
+        "all_domains": info.get("all_domains") or [],
         "type": info.get("company_type"),
         "employees": info.get("employee_count_range"),
     }
 
 
-def _same_company(a: str, b: str, domain: str = "") -> bool:
+def _same_company(a: str, b: str) -> bool:
     x, y = normalize(a), normalize(b)
-    stem = normalize(domain.split(".")[0])
-    return x in y or y in x or _similarity(x, y) >= 0.75 or (bool(stem) and stem in x.replace(" ", ""))
+    return bool(x and y) and (x in y or y in x or _similarity(x, y) >= 0.75)
 
 
 def _size_rank(employees: str | None) -> int:
@@ -55,6 +55,12 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
         return {"status": "unresolved", "detail": "The request does not name a vendor to review.", "evidence": []}
 
     query = corrected or typed
+    stated_domain = domain
+    if domain:
+        # Follow the customer's link first: an alias such as notion.so can hold another company's record.
+        domain = collect.canonical_domain(domain)
+        if domain != stated_domain:
+            emit("info", f"{stated_domain} redirects to {domain}")
     try:
         matches = crust.identify(domain=domain) if domain else crust.identify(name=query)
     except CrustError as exc:
@@ -71,9 +77,14 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
                 "detail": f"No company record matches \"{label}\". Please supply the vendor's website."}
 
     if domain:
-        best = candidates[0]
+        owners = [c for c in candidates if c["domain"] == domain or domain in (c.get("all_domains") or [])]
+        best = next((c for c in owners if typed and _same_company(query, c["name"])), owners[0] if owners else None)
+        if best is None:
+            names = ", ".join(f"{c['name']} ({c['domain']})" for c in candidates[:3])
+            return {"status": "unresolved", "input": domain, "evidence": [ev.id],
+                    "detail": f"No company record clearly owns {domain}. Nearest records: {names}. Please confirm the vendor's legal name."}
         # The name and website came from the customer, so they must describe one company.
-        if typed and not _same_company(corrected or typed, best["name"], domain):
+        if typed and not _same_company(query, best["name"]):
             return {"status": "unresolved", "input": f"{typed} / {domain}", "evidence": [ev.id],
                     "detail": f"The request names \"{typed}\", but {domain} belongs to {best['name']}. Please confirm which company you mean."}
         return {"status": "resolved", "input": domain, "name": best["name"], "domain": best["domain"],
@@ -90,7 +101,7 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
     domains = {c["domain"] for c in pool}
     if len(domains) > 1:
         ranked = sorted(pool, key=lambda c: _size_rank(c["employees"]), reverse=True)
-        if _size_rank(ranked[0]["employees"]) < 10 * max(_size_rank(ranked[1]["employees"]), 1):
+        if _size_rank(ranked[0]["employees"]) < 5 * max(_size_rank(ranked[1]["employees"]), 1):
             names = ", ".join(f"{c['name']} ({c['domain']}, {c['employees'] or 'size unknown'})" for c in ranked[:4])
             return {"status": "unresolved", "input": query, "evidence": [ev.id], "candidates": ranked[:4],
                     "detail": f"\"{query}\" could mean several companies: {names}. Please say which one."}
@@ -163,6 +174,8 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
 
             ctx["incidents"] = _combine_incidents(extract.merge_incidents(found["findings"]), hibp)
             ctx["certifications"] = extract.merge_certs(found["findings"])
+            ctx["closures"] = [{"summary": f.claim, "date": f.attrs.get("date"), "evidence": [f.evidence_id]}
+                               for f in found["findings"] if f.kind == "closure"]
             ctx["coverage"] = {
                 "site_reachable": reachable or bool(web["trust_pages"]),
                 "site_evidence": [passive_id],

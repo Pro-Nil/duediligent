@@ -22,12 +22,13 @@ Return one JSON object with these keys:
 "incidents": list of {"summary": one short sentence, "date": "YYYY-MM" or "YYYY" of the incident or null, "role": "breached_vendor" if the vendor's own systems were breached, "customer_accounts" if customers' accounts on the vendor were compromised, "supplier" if the vendor was hit through a supplier, "quote": exact sentence copied from the page that says this happened to this vendor, "remediation_quote": exact sentence copied from the page saying the vendor contained or fixed it, or null}
 "certifications": list of {"framework": one of "SOC2_TYPE2","SOC2","ISO27001","ISO27701","PCI_DSS","HIPAA","FEDRAMP","OTHER", "status": "current_claim" if the vendor is stated to hold it now, "in_progress" if it is being pursued, "mention_only" if merely discussed, "quote": exact sentence copied from the page}
 "controls": list of {"control": one of "bug_bounty","disclosure_policy","encryption","dpa","subprocessors","pen_test", "quote": exact sentence copied from the page}
+"closure": null, or {"summary": one short sentence, "date": "YYYY-MM" or "YYYY" or null, "quote": exact sentence copied from the page stating the vendor as a company has shut down or stopped operating}. A product being retired, a closed office or a layoff is not a closure.
 Rules: quotes must be copied word for word from the page. Only report facts about the named vendor, not its competitors, customers, or other companies. Generic articles about breaches elsewhere produce empty lists. If there is nothing, return empty lists."""
 
 
 def parse_request(llm: LLM, request: str) -> dict:
     try:
-        out = llm.json(INTAKE_SYSTEM, f"<request>\n{request[:2000]}\n</request>", max_tokens=400)
+        out = llm.json(INTAKE_SYSTEM, f"<request>\n{request[:2000]}\n</request>", max_tokens=400, required=("vendor_name", "data_sensitivity"))
     except LLMError:
         out = {}
     if not out:
@@ -42,7 +43,7 @@ def parse_request(llm: LLM, request: str) -> dict:
 
 def _extract_page(llm: LLM, vendor: str, ev_id: str, ev_title: str, text: str) -> dict:
     user = f"Vendor: {vendor}\nPage title: {ev_title}\n<page>\n{text[:24000]}\n</page>"
-    return llm.json(EXTRACT_SYSTEM, user, max_tokens=2000)
+    return llm.json(EXTRACT_SYSTEM, user, max_tokens=2000, required=("incidents", "certifications", "controls"))
 
 
 def _mentions(vendor: str, *texts: str) -> bool:
@@ -78,6 +79,13 @@ def findings_from_page(store: EvidenceStore, vendor: str, ev_id: str, raw: dict,
             attrs={"date": inc.get("date"), "role": inc.get("role"), "remediated": remediated,
                    "remediation_quote": remediation if remediated else None},
         ))
+    closure = raw.get("closure")
+    if isinstance(closure, dict) and closure.get("quote"):
+        if page_names_vendor:
+            keep(Finding(kind="closure", claim=str(closure.get("summary") or closure["quote"])[:300], evidence_id=ev_id,
+                         quote=closure["quote"], attrs={"date": closure.get("date")}))
+        else:
+            rejected += 1
     for cert in raw.get("certifications") or []:
         if not isinstance(cert, dict) or not cert.get("quote"):
             rejected += 1

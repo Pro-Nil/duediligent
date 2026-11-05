@@ -62,6 +62,15 @@ def to_markdown(r: dict) -> str:
     section("Conditions", d["conditions"])
     section("Notes", d["notes"])
 
+    if not r["coverage"].get("search_evidence"):
+        # With no searches behind it, silence would read as a clean record, so stop here.
+        out.extend(["## Not checked", "", "No breach or certification search ran, so this report says nothing about either.", ""])
+        if r["evidence"]:
+            out.extend(["## Evidence", ""])
+            out.extend(f"- **{e['id']}** ({e['kind']}) {e['title']} | {e['source']} | {e['retrieved_at']}" for e in r["evidence"])
+        out.extend(["", "*Based on public information only. It does not replace a contractual security review.*"])
+        return "\n".join(out)
+
     out.extend(["## Incidents", ""])
     if r["incidents"]:
         for i in r["incidents"]:

@@ -48,19 +48,24 @@ class Crust:
             },
         )
         self._lock = threading.Lock()
-        self._next_slot: dict[str, float] = {}
+        self._sent: dict[str, list[float]] = {}
         self.calls: list[dict] = []
 
     def _pace(self, path: str) -> None:
+        """Sliding window: a burst is fine until the per-minute limit, then it waits."""
         rpm = RATE_LIMITS.get(path)
         if not rpm:
             return
-        with self._lock:
-            now = time.monotonic()
-            slot = max(now, self._next_slot.get(path, 0.0))
-            self._next_slot[path] = slot + 60.0 / rpm
-        if slot > now:
-            time.sleep(slot - now)
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                recent = [t for t in self._sent.get(path, []) if now - t < 61]
+                if len(recent) < rpm:
+                    recent.append(now)
+                    self._sent[path] = recent
+                    return
+                wait = 61 - (now - recent[0])
+            time.sleep(max(wait, 0.1))
 
     def post(self, path: str, body: dict, retries: int = 3) -> Any:
         cached = cache.get("crust", [path, body])

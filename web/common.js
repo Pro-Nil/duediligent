@@ -10,15 +10,15 @@ const DECISIONS = {
     help: "The agent stopped rather than guess: the name was ambiguous, sources disagreed, or data was missing."},
   "ERROR": {c: "var(--bad)", cs: "var(--bad-soft)", label: "Error", say: "", help: "The review could not run."},
 };
-// Who can clear each kind of issue, so the reader knows what to do next.
+// What would resolve each kind of open issue, so the reader knows what to do next.
 const CLEARS = {
-  R1: "You: confirm which company you mean",
-  R2: "A person: confirm the company still operates",
-  R3: "Re-run the review, or a person checks manually",
-  R4: "The vendor's written answer, read by a person",
-  R5: "The vendor's audit report (upload on the vendor page)",
-  R6: "You: confirm the contracting entity",
-  R8: "You: ask the vendor",
+  R1: "Tell the agent which company you mean",
+  R2: "Have a person confirm the company still operates",
+  R3: "Re-run the review, or have a person check it by hand",
+  R4: "Ask the vendor how they fixed it, and have a person read the answer",
+  R5: "Get the vendor's audit report: they upload it through the vendor link",
+  R6: "Confirm which legal entity signs the contract",
+  R8: "Ask the vendor, and have a person judge the answer",
 };
 const COLORS = Object.fromEntries(Object.entries(DECISIONS).map(([k, v]) => [k, v.c]));
 const RULES = {R1: "Identity", R2: "Viability", R3: "Coverage", R4: "Incident", R5: "Certification", R6: "Stability", R7: "Outcome", R8: "Business check"};
@@ -236,7 +236,7 @@ function reasonItems(list, style, showClears = true) {
     const clears = showClears && style !== "var(--mut)" && CLEARS[code];
     return `<div class="item"><span class="${style === "box" ? "box" : "dot"}" style="--c:${style}"></span><div>
     <div>${esc(r.text)} ${cites(r.evidence)}</div>
-    <div class="meta"><span class="rule">${esc(ruleName(r.rule))}</span>${clears ? ` · <span class="clears">Cleared by: ${esc(clears)}</span>` : ""}</div></div></div>`;
+    <div class="meta"><span class="rule">${esc(ruleName(r.rule))}</span>${clears ? ` · <span class="clears">To resolve: ${esc(clears)}</span>` : ""}</div></div></div>`;
   }).join("");
 }
 

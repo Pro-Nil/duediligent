@@ -4,70 +4,69 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>duediligent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/web/style.css">
-<style>
-textarea{width:100%;min-height:76px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:inherit;font:inherit;resize:vertical}
-#next h3{margin:0 0 4px;font-size:15px}
-#next code{font-size:13px;overflow-wrap:anywhere}
-</style>
 </head>
 <body>
-<main>
-  <header><b>duediligent</b><p>Vendor security reviews, finished. Every claim checked against its source. <a href="/batch">Review a vendor list</a></p></header>
-  <textarea id="q" placeholder="We want to use Acme Corp to store customer personal data. Can we?"></textarea>
-  <div class="row">
-    <button id="go">Review vendor</button>
-    <button class="chip" data-q="Our marketing agency wants to place video ads with Quibi. Is the vendor OK?">Closed company</button>
-    <button class="chip" data-q="New payment vendor: Stripe. Their website is paypal.com. Is it OK?">Name and website disagree</button>
-    <button class="chip" data-q="Can we buy from NTRO?">Ambiguous acronym</button>
-    <button class="chip" data-q="hubspott for our crm? it would have customer emails">A typo</button>
+<main class="page">
+  <div class="lede">
+    <div class="eyebrow">Vendor security review</div>
+    <h1>Can we trust this supplier?</h1>
+    <p>Describe the vendor and what you would use it for. The agent identifies the company, gathers evidence, checks every quote against its source, and decides by a fixed rulebook.</p>
   </div>
-  <div id="log" aria-live="polite"></div>
-  <div id="verdict"><strong id="outcome"></strong><span id="meta"></span></div>
-  <section class="card" id="next"></section>
-  <article id="report"></article>
+
+  <section class="card composer">
+    <textarea id="q" placeholder="We want to store customer personal data in Acme Corp, acme.com. Is it safe?" aria-label="Review request"></textarea>
+    <div class="bar">
+      <div class="examples"><span>Try</span>
+        <button class="chip" data-q="Here is a new vendor: Notion, notion.so. We want to keep our internal docs there. Is it safe?">Notion</button>
+        <button class="chip" data-q="We are outsourcing IT support to Capgemini, capgemini.com. They would have access to our employee data. Can we sign?">Capgemini</button>
+        <button class="chip" data-q="Our marketing agency wants to place video ads with Quibi. Is the vendor OK?">A closed company</button>
+        <button class="chip" data-q="Can we buy from NTRO?">An ambiguous name</button>
+      </div>
+      <span class="push mut small"><kbd>Ctrl</kbd> <kbd>Enter</kbd></span>
+      <button class="btn" id="go">Review vendor</button>
+    </div>
+  </section>
+
+  <div class="run hide" id="run">
+    <section class="card steps" id="steps" aria-label="Progress"></section>
+    <section class="card feed" id="feed" aria-live="polite"></section>
+  </div>
+
+  <div id="result"></div>
 </main>
 <script src="/web/common.js"></script>
 <script>
-const $ = id => document.getElementById(id);
-function line(text, cls){ const d=document.createElement('div'); d.className=cls||''; d.textContent=text; $('log').appendChild(d); }
-document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { $('q').value = b.dataset.q; });
-function nextStep(m) {
-  const box = $('next');
-  if (m.outcome === 'APPROVE WITH CONDITIONS' && m.case_id) {
-    const url = `${location.origin}/vendor/${m.case_id}`;
-    box.innerHTML = `<h3>Next: get the vendor's documents</h3>
-      <p class="mut">Send the vendor this link. When they upload their audit report, it is checked and the decision is made again.</p>
-      <div class="row"><code>${esc(url)}</code><a href="${url}" target="_blank">Open vendor page</a></div>`;
-  } else if (m.watch && ['created', 'existing'].includes(m.watch.status)) {
-    box.innerHTML = `<h3>Monitoring is on</h3><p class="mut">Crustdata watch #${esc(m.watch.watch_id)} will alert ${esc(m.watch.email)} if the vendor's news or headcount changes.</p>`;
-  } else if (m.watch) {
-    box.innerHTML = `<h3>Monitoring not set up</h3><p class="mut">${esc(m.watch.reason)}</p>`;
-  } else { box.style.display = 'none'; return; }
-  box.style.display = 'block';
-}
-$('go').onclick = () => {
-  const request = $('q').value.trim();
-  if (!request) return;
-  $('go').disabled = true; $('log').textContent = '';
-  ['verdict', 'report', 'next'].forEach(id => $(id).style.display = 'none');
-  const es = new EventSource('/api/review?request=' + encodeURIComponent(request));
-  const finish = () => { es.close(); $('go').disabled = false; };
+topbar("review");
+document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; $("q").focus(); });
+$("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("go").click(); });
+
+$("go").onclick = () => {
+  const request = $("q").value.trim();
+  if (!request) { $("q").focus(); return; }
+  $("go").disabled = true; $("go").textContent = "Reviewing…";
+  $("result").innerHTML = ""; $("feed").innerHTML = ""; $("run").classList.remove("hide");
+  const stages = makeStages($("steps"));
+  const line = (t, cls) => { const d = document.createElement("div"); d.className = cls || ""; d.textContent = t; $("feed").appendChild(d); $("feed").scrollTop = 1e9; };
+  const es = new EventSource("/api/review?request=" + encodeURIComponent(request));
+  const finish = () => { es.close(); $("go").disabled = false; $("go").textContent = "Review vendor"; };
   es.onmessage = e => {
     const m = JSON.parse(e.data);
-    if (m.type === 'log' && m.level !== 'done') line(m.message, m.level);
-    if (m.type === 'error') { line(m.message, 'warn'); finish(); }
-    if (m.type === 'result') {
-      $('outcome').textContent = m.outcome;
-      $('verdict').style.setProperty('--c', COLORS[m.outcome] || 'var(--fg)');
-      $('meta').innerHTML = `${m.audit.verified} of ${m.audit.total} citations verified · ${Math.round(m.elapsed)}s · <a href="/report/${m.case_id}" target="_blank">Full report</a>`;
-      $('verdict').style.display = 'block';
-      nextStep(m);
-      $('report').innerHTML = m.html; $('report').style.display = 'block';
+    if (m.type === "log" && m.level !== "done") {
+      line(m.message, m.level === "step" ? "step-line" : m.level === "warn" ? "warn" : "");
+      if (m.level === "step") stages.step(m.message); else stages.detail(m.message, m.level === "warn");
+    }
+    if (m.type === "error") { line(m.message, "warn"); finish(); }
+    if (m.type === "result") {
+      stages.finish();
+      renderReport($("result"), m);
+      $("result").scrollIntoView({behavior: "smooth", block: "start"});
       finish();
     }
   };
-  es.onerror = () => { line('Connection lost.', 'warn'); finish(); };
+  es.onerror = () => { line("Connection lost.", "warn"); finish(); };
 };
 </script>
 </body>

@@ -40,6 +40,36 @@ def _summary(result: dict) -> dict:
         "audit": result["audit"],
         "html": markdown_body(to_markdown(result)),
         "watch": result.get("watch"),
+        "report": _structured(result),
+    }
+
+
+def _structured(r: dict) -> dict:
+    """Everything the page needs to draw the report itself, without internal working state."""
+    stab = r.get("stability") or {}
+    cov = r.get("coverage") or {}
+    keep = ("founded", "status", "headcount", "headcount_yoy", "openings", "acquired", "evidence")
+    return {
+        "request": r.get("request"),
+        "reviewed_at": r.get("reviewed_at"),
+        "elapsed": r.get("elapsed_seconds"),
+        "sensitivity": r.get("sensitivity"),
+        "intake": {k: (r.get("intake") or {}).get(k) for k in ("vendor_name", "purpose", "domain")},
+        "identity": r.get("identity"),
+        "decision": r.get("decision"),
+        "stability": {k: stab.get(k) for k in keep},
+        "closures": r.get("closures") or [],
+        "coverage": {k: cov.get(k) for k in ("site_reachable", "site_evidence", "searches_ok", "search_evidence", "failed_urls")},
+        "incidents": r.get("incidents") or [],
+        "certifications": [c for c in r.get("certifications") or [] if c.get("framework") != "OTHER"],
+        "documents": [{k: v for k, v in doc.items() if k != "pages"} for doc in r.get("documents") or []],
+        "findings": [{k: f.get(k) for k in ("kind", "claim", "evidence_id", "quote", "value", "attrs", "verified")}
+                     for f in r.get("findings") or [] if f.get("verified")],
+        "evidence": r.get("evidence") or [],
+        "audit": r.get("audit"),
+        "vendor_email": r.get("vendor_email"),
+        "watch": r.get("watch"),
+        "history": r.get("history") or [],
     }
 
 
@@ -80,6 +110,7 @@ def case_info(case_id: str) -> dict:
     result = json.loads((_case(case_id) / "report.json").read_text(encoding="utf-8"))
     out = _summary(result)
     out["vendor_email"] = result.get("vendor_email")
+    out["case_url"] = f"/vendor/{case_id}"
     out["documents"] = [{k: doc.get(k) for k in ("filename", "report_type", "period_end", "opinion")} for doc in result.get("documents") or []]
     return out
 

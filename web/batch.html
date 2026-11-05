@@ -3,58 +3,91 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Vendor register</title>
+<title>Supplier register</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
-<main class="wide">
-  <header><b>duediligent</b> · vendor register<p>Upload your supplier list and get every vendor reviewed, ranked by risk. <a href="/">Review one vendor</a></p></header>
-  <section class="card">
-    <p class="mut">CSV with a <code>vendor</code> column, and optional <code>domain</code> and <code>purpose</code> columns. Up to 50 rows. <a href="/web/sample_vendors.csv" download>Sample file</a></p>
-    <div class="row"><input type="file" id="file" accept=".csv,text/csv"><button id="go">Review all</button><span id="progress" class="mut"></span></div>
+<main class="page">
+  <div class="lede">
+    <div class="eyebrow">Supplier register</div>
+    <h1>Review every supplier at once</h1>
+    <p>Upload your supplier list. Each vendor gets a full review, and the register is ranked from riskiest to safest.</p>
+  </div>
+
+  <section class="card pad">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".csv,text/csv">
+      <div><b id="dropt">Drop a CSV here, or choose a file</b>
+        <span class="mut small" id="drops">A <code>vendor</code> column, with optional <code>domain</code> and <code>purpose</code> columns. Up to 50 rows.</span></div>
+    </label>
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
+      <a class="btn ghost sm" href="/web/sample_vendors.csv" download>Download a sample list</a>
+      <button class="btn ghost sm" id="usesample">Use the sample list</button>
+      <button class="btn push" id="go" disabled>Review all</button>
+    </div>
+    <div class="progress hide" id="bar"><i id="barfill"></i></div>
   </section>
-  <div class="tablewrap"><table id="table" hidden>
-    <thead><tr><th>Vendor</th><th>Decision</th><th>Main reason</th><th>Citations</th><th></th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table></div>
-  <p><button id="dl" class="chip" hidden>Download register as CSV</button></p>
+
+  <div class="summary-bar hide" id="counts"></div>
+
+  <section class="card hide" id="tablecard" style="margin-top:6px">
+    <div class="tablewrap"><table>
+      <thead><tr><th>Vendor</th><th>Decision</th><th>Main reason</th><th>Citations</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+  <div style="display:flex;margin-top:12px"><button class="btn ghost sm push hide" id="dl">Download register as CSV</button></div>
 </main>
 <script src="/web/common.js"></script>
 <script>
-const $ = id => document.getElementById(id);
-let rows = [], total = 0;
+topbar("batch");
+let file = null, rows = [], total = 0;
+const pick = f => { if (!f) return; file = f; $("dropt").textContent = f.name; $("drops").textContent = `${(f.size / 1024).toFixed(1)} KB · ready`; $("go").disabled = false; };
+$("file").onchange = () => pick($("file").files[0]);
+["dragenter", "dragover"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.add("over"); }));
+["dragleave", "drop"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.remove("over"); }));
+$("drop").addEventListener("drop", e => pick(e.dataTransfer.files[0]));
+$("usesample").onclick = async () => { const b = await fetch("/web/sample_vendors.csv").then(r => r.blob()); pick(new File([b], "sample_vendors.csv", {type: "text/csv"})); };
+
+const ORDER = ["REJECT", "REFER TO HUMAN", "APPROVE WITH CONDITIONS", "APPROVE"];
 function render() {
   rows.sort((a, b) => a.severity - b.severity || String(a.vendor).localeCompare(String(b.vendor)));
-  $('rows').innerHTML = rows.map(r => `<tr>
-    <td><b>${esc(r.vendor)}</b><div class="mut">${esc(r.domain || r.input?.domain || "")}</div></td>
-    <td><span class="pill" style="--c:${COLORS[r.outcome] || 'var(--fg)'}">${esc(r.outcome)}</span></td>
+  $("rows").innerHTML = rows.map(r => `<tr>
+    <td><b>${esc(r.vendor)}</b><div class="mut small">${[r.domain || r.input?.domain, r.input?.purpose].filter(Boolean).map(esc).join(" · ")}</div></td>
+    <td>${badge(r.outcome)}</td>
     <td class="reason"><div title="${esc(r.top_reason)}">${esc(r.top_reason)}</div></td>
-    <td class="mut">${r.audit ? `${r.audit.verified}/${r.audit.total}` : ""}</td>
-    <td>${r.case_id ? `<a href="/report/${r.case_id}" target="_blank">Report</a>${r.outcome === "APPROVE WITH CONDITIONS" ? ` · <a href="/vendor/${r.case_id}" target="_blank">Vendor link</a>` : ""}` : ""}</td>
+    <td class="mono small mut">${r.audit ? `${r.audit.verified}/${r.audit.total}` : ""}</td>
+    <td class="act">${r.case_id ? `<a class="btn ghost sm" href="/report/${r.case_id}" target="_blank">Report</a>${r.outcome === "APPROVE WITH CONDITIONS" ? ` <a class="btn ghost sm" href="/vendor/${r.case_id}" target="_blank">Vendor link</a>` : ""}` : ""}</td>
   </tr>`).join("");
-  $('table').hidden = !rows.length;
-  $('progress').textContent = `${rows.length} of ${total} reviewed`;
+  const n = o => rows.filter(r => r.outcome === o).length;
+  $("counts").innerHTML = `<div class="stat"><b>${rows.length}/${total}</b><span>Reviewed</span></div>` +
+    ORDER.map(o => `<div class="stat" style="border-left:3px solid ${deco(o).c}"><b>${n(o)}</b><span>${deco(o).label}</span></div>`).join("");
+  $("tablecard").classList.toggle("hide", !rows.length);
+  $("barfill").style.width = total ? `${(100 * rows.length / total).toFixed(0)}%` : "0";
 }
-$('go').onclick = async () => {
-  const f = $('file').files[0];
-  if (!f) { $('progress').textContent = 'Choose a CSV first.'; return; }
-  rows = []; render(); $('go').disabled = true; $('dl').hidden = true;
-  const body = new FormData(); body.append('file', f);
-  await postStream('/api/batch', body, m => {
-    if (m.type === 'start') { total = m.total; render(); }
-    if (m.type === 'row') { rows.push(m); render(); }
-    if (m.type === 'error') $('progress').textContent = m.message;
-    if (m.type === 'done') { $('progress').textContent = `All ${total} reviewed.`; $('dl').hidden = false; }
+$("go").onclick = async () => {
+  if (!file) return;
+  rows = []; total = 0;
+  $("go").disabled = true; $("go").textContent = "Reviewing…"; $("dl").classList.add("hide");
+  $("bar").classList.remove("hide"); $("counts").classList.remove("hide"); render();
+  const body = new FormData(); body.append("file", file);
+  await postStream("/api/batch", body, m => {
+    if (m.type === "start") { total = m.total; render(); }
+    if (m.type === "row") { rows.push(m); render(); }
+    if (m.type === "error") $("drops").textContent = m.message;
+    if (m.type === "done") $("dl").classList.remove("hide");
   });
-  $('go').disabled = false;
+  $("go").disabled = false; $("go").textContent = "Review all";
 };
-$('dl').onclick = () => {
+$("dl").onclick = () => {
   const q = s => `"${String(s ?? "").replace(/"/g, '""')}"`;
   const lines = [["vendor", "domain", "decision", "main_reason", "citations_verified", "report"].join(",")]
     .concat(rows.map(r => [r.vendor, r.domain, r.outcome, r.top_reason, r.audit ? `${r.audit.verified}/${r.audit.total}` : "", r.case_id ? `${location.origin}/report/${r.case_id}` : ""].map(q).join(",")));
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([lines.join("\n")], {type: "text/csv"}));
-  a.download = "vendor-register.csv"; a.click();
+  a.download = "supplier-register.csv"; a.click();
 };
 </script>
 </body>

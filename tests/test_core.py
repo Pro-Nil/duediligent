@@ -340,3 +340,12 @@ def test_undated_repeat_of_a_claim_joins_the_dated_report():
     b = Finding("incident", "Threat actor grep claimed to have stolen 20GB of Capgemini data", "E2", quote="q2", attrs={"date": None, "role": "breached_vendor"})
     merged = extract.merge_incidents([a, b])
     assert len(merged) == 1 and set(merged[0]["evidence"]) == {"E1", "E2"}
+
+
+def test_undated_reports_sharing_a_figure_join_the_dated_report():
+    a = Finding("incident", "A hacking forum post claimed Capgemini suffered a data breach in September 2024 exposing about 20 GB of data", "E1", quote="q1",
+                attrs={"date": "2024-09", "role": "breached_vendor"})
+    b = Finding("incident", "Threat actor 'grep' claimed to have stolen 20GB of Capgemini data", "E2", quote="q2", attrs={"date": None})
+    c = Finding("incident", "A cyber-criminal claimed to have compromised Capgemini and stolen 20GB of data including databases", "E3", quote="q3", attrs={"date": None})
+    merged = extract.merge_incidents([a, b, c])
+    assert len(merged) == 1 and set(merged[0]["evidence"]) == {"E1", "E2", "E3"}

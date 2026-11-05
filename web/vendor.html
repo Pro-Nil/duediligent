@@ -3,53 +3,83 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Vendor documents</title>
+<title>Security review documents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
-<main>
-  <header><b>duediligent</b> · vendor documents<p id="sub">Loading…</p></header>
-  <section class="card" id="ask"></section>
-  <section class="card">
+<main class="page narrow">
+  <div class="lede">
+    <div class="eyebrow">Document request</div>
+    <h1 id="title">Security review</h1>
+    <p id="sub">Loading…</p>
+  </div>
+
+  <section class="card pad" id="ask"></section>
+
+  <section class="card pad" style="margin-top:14px">
     <h3>Upload your audit report</h3>
-    <p class="mut">A SOC 2 Type II report, SOC 3 report or ISO 27001 certificate, as a text PDF. It is checked automatically: the organisation, audit period, auditor and opinion are each read from the document and cited to their page.</p>
-    <div class="row">
+    <p class="mut small" style="margin:0 0 12px">A SOC 2 Type II report, a SOC 3 report or an ISO 27001 certificate, as a text PDF up to 15 MB. It is checked automatically: the organisation, audit period, auditor and opinion are each read from the document and cited to their page.</p>
+    <label class="drop" id="drop">
       <input type="file" id="file" accept="application/pdf">
-      <button id="send">Upload and re-check</button>
-    </div>
+      <div><b id="dropt">Drop a PDF here, or choose a file</b><span class="mut small" id="drops">Nothing is shared outside this review.</span></div>
+    </label>
+    <div style="display:flex;margin-top:12px"><button class="btn push" id="send" disabled>Upload and re-check</button></div>
   </section>
-  <div id="log" aria-live="polite"></div>
-  <div id="verdict"><strong id="outcome"></strong><span id="meta"></span></div>
-  <article id="report"></article>
+
+  <div class="run hide" id="run" style="grid-template-columns:260px 1fr">
+    <section class="card steps" id="steps"></section>
+    <section class="card feed" id="feed" aria-live="polite"></section>
+  </div>
+  <div id="result"></div>
 </main>
 <script src="/web/common.js"></script>
 <script>
-const $ = id => document.getElementById(id);
+topbar("");
 const caseId = location.pathname.split("/").pop();
-function line(text, cls){ const d=document.createElement('div'); d.className=cls||''; d.textContent=text; $('log').appendChild(d); }
-function show(m) {
-  $('outcome').textContent = m.outcome;
-  $('verdict').style.setProperty('--c', COLORS[m.outcome] || 'var(--fg)');
-  $('meta').textContent = `${m.audit.verified} of ${m.audit.total} citations verified`;
-  $('verdict').style.display = 'block';
-  $('report').innerHTML = m.html; $('report').style.display = 'block';
-}
-fetch(`/api/case/${caseId}`).then(r => r.json()).then(c => {
-  $('sub').textContent = `Security review of ${c.vendor}${c.domain ? " (" + c.domain + ")" : ""}. Current decision: ${c.outcome}.`;
-  $('ask').innerHTML = `<h3>What the reviewer needs</h3><ul>${c.conditions.map(t => `<li>${esc(t)}</li>`).join("") || "<li>Nothing outstanding.</li>"}</ul>`
-    + (c.documents.length ? `<p class="mut">Already received: ${c.documents.map(d => esc(d.filename)).join(", ")}</p>` : "");
-});
-$('send').onclick = async () => {
-  const f = $('file').files[0];
-  if (!f) { line('Choose a PDF first.', 'warn'); return; }
-  $('send').disabled = true; $('log').textContent = '';
-  const body = new FormData(); body.append('file', f);
-  await postStream(`/api/case/${caseId}/document`, body, m => {
-    if (m.type === 'log' && m.level !== 'done') line(m.message, m.level);
-    if (m.type === 'error') line(m.message, 'warn');
-    if (m.type === 'result') show(m);
+let file = null;
+const pick = f => {
+  if (!f) return;
+  if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { $("drops").textContent = "Please choose a PDF."; return; }
+  file = f; $("dropt").textContent = f.name; $("drops").textContent = `${(f.size / 1024).toFixed(0)} KB · ready to upload`; $("send").disabled = false;
+};
+$("file").onchange = () => pick($("file").files[0]);
+["dragenter", "dragover"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.add("over"); }));
+["dragleave", "drop"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.remove("over"); }));
+$("drop").addEventListener("drop", e => pick(e.dataTransfer.files[0]));
+
+function loadCase() {
+  return fetch(`/api/case/${caseId}`).then(r => r.json()).then(c => {
+    $("title").textContent = `Security review: ${c.vendor}`;
+    $("sub").innerHTML = `${c.domain ? esc(c.domain) + " · " : ""}Current decision ${badge(c.outcome)}`;
+    $("ask").innerHTML = `<h3>What the reviewer still needs</h3>${c.conditions.length
+      ? c.conditions.map(t => `<div class="item"><span class="box"></span><div>${esc(t)}</div></div>`).join("")
+      : `<p class="empty">Nothing outstanding.</p>`}
+      ${c.documents.length ? `<p class="mut small" style="margin:10px 0 0">Already received: ${c.documents.map(d => esc(d.filename)).join(", ")}</p>` : ""}`;
   });
-  $('send').disabled = false;
+}
+loadCase();
+
+$("send").onclick = async () => {
+  if (!file) return;
+  $("send").disabled = true; $("send").textContent = "Checking…";
+  $("feed").innerHTML = ""; $("result").innerHTML = ""; $("run").classList.remove("hide");
+  const stages = makeStages($("steps"), [
+    ["read", "Read the document", /Reading /],
+    ["decide", "Apply the rulebook", /Applying the rulebook/],
+  ]);
+  const line = (t, cls) => { const d = document.createElement("div"); d.className = cls || ""; d.textContent = t; $("feed").appendChild(d); };
+  const body = new FormData(); body.append("file", file);
+  await postStream(`/api/case/${caseId}/document`, body, m => {
+    if (m.type === "log" && m.level !== "done") {
+      line(m.message, m.level === "step" ? "step-line" : m.level === "warn" ? "warn" : "");
+      if (m.level === "step") stages.step(m.message); else stages.detail(m.message, m.level === "warn");
+    }
+    if (m.type === "error") line(m.message, "warn");
+    if (m.type === "result") { stages.finish(); renderReport($("result"), m, {vendorView: true}); showTab($("result"), "certs"); loadCase(); }
+  });
+  $("send").disabled = false; $("send").textContent = "Upload and re-check";
 };
 </script>
 </body>

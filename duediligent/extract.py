@@ -172,6 +172,12 @@ def _words(text: str) -> set[str]:
     return {w for w in normalize(text).split() if len(w) > 2 and w not in STOP}
 
 
+def _figures(text: str) -> set[str]:
+    """Distinctive amounts such as "20GB" or "4,961 people", written one way."""
+    joined = re.sub(r"(\d)[,\s]+(?=\d{3}\b)", r"\1", normalize(text))
+    return {m.replace(" ", "") for m in re.findall(r"\b\d+\s?(?:gb|tb|mb|million|billion|k|records|accounts|customers|users|people)\b", joined)}
+
+
 def _merge_nearby(rows: list[dict]) -> list[dict]:
     """Reports date one breach by discovery or disclosure, so join reports within two months.
     An undated report joins the report it most resembles, so one claim is not counted twice."""
@@ -179,11 +185,13 @@ def _merge_nearby(rows: list[dict]) -> list[dict]:
     undated = [r for r in rows if not r.get("date")]
     rows = dated
     for row in undated:
-        mine = _words(row["summary"])
+        mine, figures = _words(row["summary"]), _figures(row["summary"])
         best, score = None, 0.0
         for other in rows:
             theirs = _words(other["summary"])
             overlap = len(mine & theirs) / max(len(mine | theirs), 1)
+            if figures & _figures(other["summary"]):
+                overlap = max(overlap, 0.5)  # the same "20GB" figure points to the same claim
             if overlap > score:
                 best, score = other, overlap
         if best is not None and score >= 0.2:

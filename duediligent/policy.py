@@ -43,6 +43,38 @@ def months_since(yyyy_mm: str | None, today: date) -> int | None:
     return (today.year - year) * 12 + today.month - month
 
 
+DOC_NAMES = {"SOC2_TYPE2": "SOC 2 Type II report", "SOC2_TYPE1": "SOC 2 Type I report", "SOC3": "SOC 3 report",
+             "ISO27001_CERT": "ISO 27001 certificate", "OTHER": "document"}
+
+
+def _documents_rule(d: Decision, documents: list[dict], identity: dict) -> None:
+    """Accept only a current, clean, independent audit of this vendor."""
+    accepted = False
+    for doc in documents:
+        kind = DOC_NAMES.get(doc.get("report_type"), "document")
+        ev = doc.get("evidence") or []
+        label = f"The uploaded {kind} ({doc.get('filename')})"
+        stale = "period" not in (doc.get("unknown") or []) and not doc.get("current")
+        if doc.get("unknown") and not stale:
+            d.conditions.append(Reason("R5 document", f"{label}: could not confirm its {', '.join(doc['unknown'])} from the document itself.", ev))
+        elif not doc.get("names_vendor"):
+            d.referrals.append(Reason("R5 document", f"{label} is for {doc.get('organisation')}, not {identity.get('name')}.", ev))
+        elif doc.get("opinion") in ("adverse", "disclaimer"):
+            d.reasons.append(Reason("R5 document", f"{label} carries an {doc['opinion']} audit opinion.", ev))
+            d.outcome = REJECT
+        elif not doc.get("current"):
+            when = doc.get("valid_until") and f"expired {doc['valid_until']}" or f"covers a period ending {doc.get('period_end')}, {doc.get('age_months')} months ago"
+            d.conditions.append(Reason("R5 document", f"{label} {when}. Reports older than 12 months do not show current controls. Request the latest report or a bridge letter.", ev))
+        elif doc.get("opinion") == "qualified" or doc.get("exceptions"):
+            listed = "; ".join(doc.get("exceptions") or ["the auditor qualified the opinion"])
+            d.conditions.append(Reason("R5 document", f"{label} is current but reports exceptions: {listed}. Confirm each is fixed.", ev))
+        else:
+            accepted = True
+            d.notes.append(Reason("R5 document", f"{label} is current, issued by {doc.get('auditor')}, and the auditor's opinion is unqualified. Certification condition met.", ev))
+    if not accepted and not d.conditions and not d.referrals and d.outcome != REJECT:
+        d.conditions.append(Reason("R5 document", "No uploaded document satisfies the certification requirement.", [e for doc in documents for e in doc.get("evidence") or []]))
+
+
 def evaluate(ctx: dict, today: date | None = None) -> Decision:
     """ctx: identity, sensitivity, incidents, certifications, stability, coverage."""
     today = today or date.today()
@@ -109,22 +141,29 @@ def evaluate(ctx: dict, today: date | None = None) -> Decision:
         else:
             d.notes.append(Reason("R4 incident", f"Older incident on record: {label}.", ev))
 
-    # R5: certifications. A claim is not proof, so sensitive data needs the report itself.
-    certs = ctx.get("certifications") or []
-    current = [c for c in certs if c.get("status") == "current_claim" and c.get("framework") in STRONG_CERTS]
-    if current:
-        names = ", ".join(CERT_LABELS.get(n, n) for n in sorted({c["framework"] for c in current}))
-        ev = sorted({e for c in current for e in c.get("evidence", [])})
-        d.notes.append(Reason("R5 certification", f"The vendor publicly claims: {names}. This review saw the claim, not the audit report.", ev))
-        if sensitivity == "high":
-            d.conditions.append(Reason("R5 certification", f"Obtain and review the current {names} report before sending sensitive data.", ev))
+    # R5: certifications. An audit report the vendor uploads outranks any claim on a web page.
+    documents = [doc for doc in ctx.get("documents") or [] if doc.get("readable")]
+    for doc in ctx.get("documents") or []:
+        if not doc.get("readable"):
+            d.conditions.append(Reason("R5 document", f"{doc.get('filename')}: {doc.get('problem')} Please upload a text PDF.", doc.get("evidence") or []))
+    if documents:
+        _documents_rule(d, documents, identity)
     else:
-        partial = [c for c in certs if c.get("status") == "in_progress"]
-        ev = sorted({e for c in partial for e in c.get("evidence", [])}) or search_ev
-        if sensitivity != "low":
-            d.conditions.append(Reason("R5 certification", "No current SOC 2 or ISO 27001 claim was found publicly. Obtain a report or complete a security questionnaire before sharing data.", ev))
+        certs = ctx.get("certifications") or []
+        current = [c for c in certs if c.get("status") == "current_claim" and c.get("framework") in STRONG_CERTS]
+        if current:
+            names = ", ".join(CERT_LABELS.get(n, n) for n in sorted({c["framework"] for c in current}))
+            ev = sorted({e for c in current for e in c.get("evidence", [])})
+            d.notes.append(Reason("R5 certification", f"The vendor publicly claims: {names}. This review saw the claim, not the audit report.", ev))
+            if sensitivity == "high":
+                d.conditions.append(Reason("R5 certification", f"Obtain and review the current {names} report before sending sensitive data.", ev))
         else:
-            d.notes.append(Reason("R5 certification", "No current SOC 2 or ISO 27001 claim was found publicly.", ev))
+            partial = [c for c in certs if c.get("status") == "in_progress"]
+            ev = sorted({e for c in partial for e in c.get("evidence", [])}) or search_ev
+            if sensitivity != "low":
+                d.conditions.append(Reason("R5 certification", "No current SOC 2 or ISO 27001 claim was found publicly. Obtain a report or complete a security questionnaire before sharing data.", ev))
+            else:
+                d.notes.append(Reason("R5 certification", "No current SOC 2 or ISO 27001 claim was found publicly.", ev))
 
     # R6: company stability.
     if stab.get("acquired"):
@@ -141,8 +180,10 @@ def evaluate(ctx: dict, today: date | None = None) -> Decision:
     for note in stab.get("notes") or []:
         d.notes.append(Reason("R8 data quality", note["text"], note.get("evidence") or []))
 
-    if rejected:
+    if rejected or d.outcome == REJECT:
         d.outcome = REJECT
+    elif d.referrals:
+        d.outcome = REFER
     elif d.conditions:
         d.outcome = CONDITIONS
         d.reasons.append(Reason("R7 outcome", f"{len(d.conditions)} condition(s) must be met before use.", []))

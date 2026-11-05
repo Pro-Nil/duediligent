@@ -91,6 +91,25 @@ def to_markdown(r: dict) -> str:
     out.extend(business_check(r))
     out.append("")
 
+    if r.get("watch"):
+        w = r["watch"]
+        out.extend(["## Monitoring", ""])
+        if w.get("status") in ("created", "existing"):
+            out.append(f"- Crustdata watch #{w['watch_id']} is active for {r['identity'].get('domain')}: {w.get('tracks')}. Alerts go to {w.get('email')}.")
+        else:
+            out.append(f"- Not set up: {w.get('reason')}")
+        out.append("")
+
+    docs = [x for x in r.get("documents") or [] if x.get("readable")]
+    if docs:
+        out.extend(["## Documents from the vendor", ""])
+        for x in docs:
+            out.append(f"- **{x['filename']}**: {x['report_type']} for {x['organisation']}, auditor {x.get('auditor')}, "
+                       f"period {x.get('period_start')} to {x.get('period_end') or x.get('valid_until')}, opinion {x['opinion']} {cite(x['evidence'])}")
+            for key, q in x.get("verified", {}).items():
+                out.append(f"  - {key}, page {q['page']}: \"{q['quote'][:220]}\" [{x['evidence'][0]}]")
+        out.append("")
+
     section("Why", d["reasons"])
     section("Needs a person", d["referrals"])
     section("Conditions", d["conditions"])

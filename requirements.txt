@@ -5,3 +5,6 @@ dnspython
 fastapi
 uvicorn
 pytest
+pypdf
+cryptography
+python-multipart

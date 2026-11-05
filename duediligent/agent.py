@@ -10,7 +10,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Callable
 
-from . import collect, extract, policy, report
+from . import collect, documents, extract, policy, report
+from . import watch as watch_mod
 from .crust import Crust, CrustError
 from .evidence import EvidenceStore, Finding, dig, normalize, now_iso
 from .llm import LLM, LLMError
@@ -189,7 +190,8 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
             "id": best["id"], "assumed": typo, "evidence": [ev.id]}
 
 
-def review(request: str, emit: Emit | None = None, crust: Crust | None = None, llm: LLM | None = None, save: bool = True) -> dict:
+def review(request: str, emit: Emit | None = None, crust: Crust | None = None, llm: LLM | None = None, save: bool = True,
+           watch: bool = False) -> dict:
     emit = emit or (lambda level, msg: None)
     started = time.time()
     store = EvidenceStore()
@@ -312,10 +314,63 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
         "errors": errors,
         "evidence": store.to_list(),
         "api_calls": len(crust.calls),
+        "ctx": ctx,
     }
     result["vendor_email"] = report.vendor_email(result)
+    if watch and decision.outcome == policy.APPROVE and ctx["identity"].get("domain"):
+        result["watch"] = watch_mod.ensure_watch(crust, ctx["identity"]["domain"])
+        emit("info", _watch_message(result["watch"]))
     if save:
         result["paths"] = _save(result, store)
+        result["case_id"] = Path(result["paths"]["folder"]).name
+    emit("done", decision.outcome)
+    return result
+
+
+def _watch_message(w: dict) -> str:
+    if w["status"] in ("created", "existing"):
+        return f"Crustdata watch #{w['watch_id']} {'created' if w['status'] == 'created' else 'already active'}: alerts go to {w['email']} on news or headcount changes."
+    return f"Monitoring not set up: {w.get('reason')}"
+
+
+def case_dir(case_id: str) -> Path:
+    if not re.fullmatch(r"[a-z0-9-]+", case_id or ""):
+        raise ValueError("bad case id")
+    folder = RUNS / case_id
+    if not (folder / "report.json").exists():
+        raise FileNotFoundError(case_id)
+    return folder
+
+
+def apply_document(case_id: str, data: bytes, filename: str, emit: Emit | None = None,
+                   llm: LLM | None = None, crust: Crust | None = None) -> dict:
+    """The vendor sent a document: check it, decide again, and save the case's new version."""
+    emit = emit or (lambda level, msg: None)
+    folder = case_dir(case_id)
+    result = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+    store = EvidenceStore.load(json.loads((folder / "evidence.json").read_text(encoding="utf-8")))
+    ctx = result["ctx"]
+    ident = ctx["identity"]
+    emit("step", f"Reading {filename}")
+    doc = documents.check_document(llm or LLM(), store, data, filename, ident.get("name") or "", ident.get("domain") or "")
+    if doc.get("readable"):
+        emit("info", f"{doc['report_type']} for {doc['organisation']}, period ending {doc.get('period_end') or doc.get('valid_until') or 'unconfirmed'}, opinion {doc['opinion']}")
+    else:
+        emit("warn", doc.get("problem") or "Unreadable document")
+    ctx.setdefault("documents", []).append(doc)
+    emit("step", "Applying the rulebook again")
+    decision = policy.evaluate(ctx, date.today())
+    findings = [Finding(**f) for f in result["findings"]]
+    audit = _audit(store, findings, ctx, decision)
+    emit("info", f"Decision: {decision.outcome}")
+    result.update({"decision": decision.to_dict(), "audit": audit, "ctx": ctx, "documents": ctx["documents"],
+                   "evidence": store.to_list(), "reviewed_at": now_iso(),
+                   "history": result.get("history", []) + [{"at": now_iso(), "event": f"Document {filename} checked", "outcome": decision.outcome}]})
+    result["vendor_email"] = report.vendor_email(result)
+    if decision.outcome == policy.APPROVE and ident.get("domain"):
+        result["watch"] = watch_mod.ensure_watch(crust or Crust(), ident["domain"])
+        emit("info", _watch_message(result["watch"]))
+    _write(folder, result, store)
     emit("done", decision.outcome)
     return result
 
@@ -358,8 +413,12 @@ def _save(result: dict, store: EvidenceStore) -> dict:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "unknown"
     folder = RUNS / f"{slug}-{int(time.time())}"
     folder.mkdir(parents=True, exist_ok=True)
+    _write(folder, result, store)
+    return {"folder": str(folder), "markdown": str(folder / "report.md"), "html": str(folder / "report.html")}
+
+
+def _write(folder: Path, result: dict, store: EvidenceStore) -> None:
     (folder / "report.json").write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     (folder / "report.md").write_text(report.to_markdown(result), encoding="utf-8")
     (folder / "report.html").write_text(report.to_html(result), encoding="utf-8")
     (folder / "evidence.json").write_text(json.dumps(store.to_list(include_body=True), indent=1, default=str), encoding="utf-8")
-    return {"folder": str(folder), "markdown": str(folder / "report.md"), "html": str(folder / "report.html")}

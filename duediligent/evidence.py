@@ -88,6 +88,16 @@ class EvidenceStore:
         self._by_key[key] = ev.id
         return ev
 
+    @classmethod
+    def load(cls, rows: list[dict]) -> "EvidenceStore":
+        store = cls()
+        for row in rows:
+            ev = Evidence(**{k: row.get(k) for k in ("id", "kind", "title", "source", "retrieved_at", "text", "data", "sha256")})
+            ev.text = ev.text or ""
+            store.items[ev.id] = ev
+            store._by_key[f"{ev.source}|{ev.sha256}"] = ev.id
+        return store
+
     def verify(self, finding: Finding) -> bool:
         """Deterministically check a finding against the stored snapshot."""
         ev = self.items.get(finding.evidence_id)

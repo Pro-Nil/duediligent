@@ -290,3 +290,45 @@ def test_acronym_with_a_better_known_full_name_is_referred():
     intake = {"vendor_name": "ntro", "full_names": ["National Technical Research Organisation"]}
     r = resolve_identity(AcronymCrust([]), EvidenceStore(), intake, lambda *a: None)
     assert r["status"] == "unresolved" and "ntro.gov.in" in r["detail"] and "ntro.fi" in r["detail"]
+
+
+def doc(**over):
+    base = {"readable": True, "filename": "r.pdf", "report_type": "SOC2_TYPE2", "organisation": "Acme Inc", "names_vendor": True,
+            "auditor": "KPMG", "period_end": "2026-06-30", "age_months": 5, "current": True, "opinion": "unqualified",
+            "exceptions": [], "unknown": [], "evidence": ["E9"]}
+    base.update(over)
+    return base
+
+
+def test_current_clean_report_meets_the_certification_condition():
+    d = policy.evaluate(base_ctx(certifications=[], sensitivity="high", documents=[doc()]), TODAY)
+    assert d.outcome == policy.APPROVE
+
+
+def test_three_year_old_report_is_not_accepted():
+    d = policy.evaluate(base_ctx(certifications=[], documents=[doc(period_end="2023-09-30", age_months=37, current=False)]), TODAY)
+    assert d.outcome == policy.CONDITIONS and "37 months" in d.conditions[0].text
+
+
+def test_report_for_another_company_goes_to_a_person():
+    d = policy.evaluate(base_ctx(documents=[doc(organisation="Other Corp", names_vendor=False)]), TODAY)
+    assert d.outcome == policy.REFER
+
+
+def test_adverse_opinion_is_rejected():
+    assert policy.evaluate(base_ctx(documents=[doc(opinion="adverse")]), TODAY).outcome == policy.REJECT
+
+
+def test_report_with_exceptions_needs_follow_up():
+    d = policy.evaluate(base_ctx(documents=[doc(exceptions=["Access reviews were not performed in Q2"])]), TODAY)
+    assert d.outcome == policy.CONDITIONS
+
+
+def test_real_soc3_pages_are_readable_and_quotes_match_across_split_words():
+    from pathlib import Path
+    from duediligent.documents import compact, pdf_pages
+    pdf = Path(__file__).parent / "fixtures" / "capgemini-soc3.pdf"
+    if not pdf.exists():
+        return
+    pages = pdf_pages(pdf.read_bytes())
+    assert compact("For the period 01 October 2022 to 30 September 2023") in compact(pages[1])

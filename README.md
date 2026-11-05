@@ -98,6 +98,7 @@ These bugs only appeared against real data:
 - **Search redirect links.** Results came back as `google.com/goto` links, which would have made useless citations. They are now resolved to the real page.
 - **Self-reported leaders.** Strangers list themselves as "CEO" or "Founder" of a well-known company; Datadog's record had several. Ranking by title and audience wasn't enough, so a person now appears only when an independent web search also names them. For Asana it now names Dan Rogers, the CEO, and Justin Rosenstein, a co-founder, and leaves out the rest.
 - **One breach, two dates.** Reports date a breach by when it was discovered or when it was disclosed, so PowerSchool, CircleCI, Zapier and Dropbox Sign each showed one breach twice. Reports within two months of each other are now merged.
+- **A near-miss spelling taken as the vendor.** A user asked about C3iHub, and it reviewed Cxihub, a different 3-person company, because the names are 83% alike. Spelling similarity no longer counts. A record must have the exact name, a website equal to the name, or a name that starts with it, tried in that order. Otherwise the agent searches for the official site, and refers the case if it finds none.
 - **Over-cautious identity checks.** "GitLab SaaS" was read as a company name, and a junk `HUBSPOT` record at an unrelated domain blocked HubSpot. Both are fixed, while two real companies sharing a name, such as Mercury, still go to a person.
 - **A record that disagrees with itself.** One record showed 7,164 staff and a 501–1000 size band. The report now flags this.
 - **Model ignoring its instructions.** A multi-line system prompt passed as a Windows command argument was cut off. The prompt now goes through a file, and replies are checked for the required fields.
@@ -110,7 +111,7 @@ We set the targets before building: 15 vendors with labels taken from public rec
 | Run | Breaches | Certifications | Messy inputs | Citations verified |
 |---|---|---|---|---|
 | [First run](eval/first_run.txt), before any fixes | 5 of 5 | 4 of 5 | 4 of 5 | All |
-| [After fixes](eval/second_run.txt) | 5 of 5 | 5 of 5 | 5 of 5 | All |
+| [After fixes](eval/final_run.txt) | 5 of 5 | 5 of 5 | 5 of 5 | All |
 
 - **Breaches:** Okta, Twilio, CircleCI, Dropbox Sign, PowerSchool
 - **Certifications:** Datadog, GitLab, Asana, Zapier, Figma
@@ -118,16 +119,17 @@ We set the targets before building: 15 vendors with labels taken from public rec
 
 The first-run failures were both over-cautious referrals, not wrong answers. The second run used the fixed code, so it isn't an unseen test.
 
-An [extra set](eval/extra_run.txt) of 8 cases also passed after the fixes:
+An [extra set](eval/final_extra_run.txt) of 9 cases also passed after the fixes:
 - two closed companies, including Quibi, whose record still says "active"
 - a lookalike domain, `stripe-payments.co`
 - an ambiguous name
 - a small, honest company, Crustdata itself. It got conditions, not a rejection.
 - one vendor asked three different ways
+- C3iHub, which must not be confused with Cxihub
 
 **Reworded requests:** all three wordings reached the same decision with the same incidents. When the three ran at the same time on an empty cache, the model's reading of pages varied: each run found different incidents, though all reached the same decision. Run one after another, they read the same saved evidence and gave identical results. The model's guess at data sensitivity still varied with wording ("medium" against "low"), which can change the conditions.
 
-**Offline tests:** 31 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
+**Offline tests:** 34 tests cover the quote check, every rule, injected page instructions, bad tool responses, timeouts and identity edge cases.
 
 **Speed:** a fresh review takes about 1.5 to 4 minutes when the model runs through the `claude` CLI, mostly waiting on the model. A repeat of a cached review takes seconds.
 <!-- /RESULTS -->

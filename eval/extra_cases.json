@@ -1,10 +1,61 @@
 [
-  {"id": "extra-closed-quibi", "group": "closed", "kind": "refer_or_reject", "request": "Our marketing agency wants to place video ads with Quibi. Is the vendor OK?"},
-  {"id": "extra-closed-convoy", "group": "closed", "kind": "refer_or_reject", "request": "Should we use Convoy, convoy.com, for our freight?"},
-  {"id": "extra-lookalike", "group": "fake", "kind": "refer", "request": "New payment vendor: Stripe, their site is stripe-payments.co. Please check it."},
-  {"id": "extra-small-honest", "group": "honest", "kind": "not_reject", "request": "Here is a new vendor's name and website: Crustdata, crustdata.com. Tell me whether it is a real, trading business: who runs it, how long it has existed, and anything that looks off.", "name": "Crustdata"},
-  {"id": "extra-ambiguous-mercury", "group": "fake", "kind": "refer", "request": "Can we buy from Mercury?"},
-  {"id": "reword-1", "group": "reworded", "kind": "same_vendor", "request": "We want to use Cloudflare in front of our website. Is that fine?", "name": "Cloudflare"},
-  {"id": "reword-2", "group": "reworded", "kind": "same_vendor", "request": "please vet cloudflare, it would sit in front of our public site", "name": "Cloudflare"},
-  {"id": "reword-3", "group": "reworded", "kind": "same_vendor", "request": "Infrastructure team proposes Cloudflare for our public website. Do a vendor review.", "name": "Cloudflare"}
+ {
+  "id": "extra-closed-quibi",
+  "group": "closed",
+  "kind": "refer_or_reject",
+  "request": "Our marketing agency wants to place video ads with Quibi. Is the vendor OK?"
+ },
+ {
+  "id": "extra-closed-convoy",
+  "group": "closed",
+  "kind": "refer_or_reject",
+  "request": "Should we use Convoy, convoy.com, for our freight?"
+ },
+ {
+  "id": "extra-lookalike",
+  "group": "fake",
+  "kind": "refer",
+  "request": "New payment vendor: Stripe, their site is stripe-payments.co. Please check it."
+ },
+ {
+  "id": "extra-small-honest",
+  "group": "honest",
+  "kind": "not_reject",
+  "request": "Here is a new vendor's name and website: Crustdata, crustdata.com. Tell me whether it is a real, trading business: who runs it, how long it has existed, and anything that looks off.",
+  "name": "Crustdata"
+ },
+ {
+  "id": "extra-ambiguous-mercury",
+  "group": "fake",
+  "kind": "refer",
+  "request": "Can we buy from Mercury?"
+ },
+ {
+  "id": "reword-1",
+  "group": "reworded",
+  "kind": "same_vendor",
+  "request": "We want to use Cloudflare in front of our website. Is that fine?",
+  "name": "Cloudflare"
+ },
+ {
+  "id": "reword-2",
+  "group": "reworded",
+  "kind": "same_vendor",
+  "request": "please vet cloudflare, it would sit in front of our public site",
+  "name": "Cloudflare"
+ },
+ {
+  "id": "reword-3",
+  "group": "reworded",
+  "kind": "same_vendor",
+  "request": "Infrastructure team proposes Cloudflare for our public website. Do a vendor review.",
+  "name": "Cloudflare"
+ },
+ {
+  "id": "extra-near-miss-c3ihub",
+  "group": "near-miss",
+  "kind": "same_vendor",
+  "request": "Can we sign a deal with C3iHub for our cybersecurity backend ? Is the company trusted?",
+  "name": "C3iHub, IIT Kanpur"
+ }
 ]

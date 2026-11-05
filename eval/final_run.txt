@@ -1,18 +1,18 @@
-PASS breach-okta          APPROVE WITH CONDITIONS   52/52       16s  flagged years [2022, 2023, 2026], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
-PASS breach-twilio        APPROVE WITH CONDITIONS   52/52       20s  flagged years [2022, 2024], expected any of [2022]; APPROVE WITH CONDITIONS
-PASS breach-dropbox       APPROVE WITH CONDITIONS   48/48       16s  flagged years [2024], expected any of [2022, 2024]; APPROVE WITH CONDITIONS
-PASS breach-circleci      APPROVE WITH CONDITIONS   54/54       44s  flagged years [2019, 2022], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
-PASS breach-powerschool   APPROVE WITH CONDITIONS   52/52       89s  flagged years [2024, 2025], expected any of [2024, 2025]; APPROVE WITH CONDITIONS
-PASS cert-datadog         APPROVE WITH CONDITIONS   52/52      101s  claimed ['FEDRAMP', 'HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
-PASS cert-asana           APPROVE WITH CONDITIONS   78/78       57s  claimed ['HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
-PASS cert-zapier          APPROVE WITH CONDITIONS   38/38       35s  claimed ['SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
-PASS cert-figma           APPROVE WITH CONDITIONS   28/28       17s  claimed ['FEDRAMP', 'ISO27001', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS breach-circleci      APPROVE WITH CONDITIONS   54/54        9s  flagged years [2019, 2022], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
+PASS breach-okta          APPROVE WITH CONDITIONS   52/52       10s  flagged years [2022, 2023, 2026], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
+PASS breach-dropbox       APPROVE WITH CONDITIONS   48/48        8s  flagged years [2024], expected any of [2022, 2024]; APPROVE WITH CONDITIONS
+PASS breach-twilio        APPROVE WITH CONDITIONS   52/52       22s  flagged years [2022, 2024], expected any of [2022]; APPROVE WITH CONDITIONS
+PASS breach-powerschool   APPROVE WITH CONDITIONS   53/53       13s  flagged years [2024, 2025], expected any of [2024, 2025]; APPROVE WITH CONDITIONS
+PASS cert-datadog         APPROVE WITH CONDITIONS   51/51       78s  claimed ['FEDRAMP', 'HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS cert-asana           APPROVE WITH CONDITIONS   78/78       83s  claimed ['HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS cert-zapier          APPROVE WITH CONDITIONS   38/38       40s  claimed ['SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS cert-figma           APPROVE WITH CONDITIONS   28/28       34s  claimed ['FEDRAMP', 'ISO27001', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
 PASS messy-ambiguous      REFER TO HUMAN            1/1          0s  REFER TO HUMAN
-PASS cert-gitlab          APPROVE WITH CONDITIONS   32/32      158s  claimed ['ISO27001', 'PCI_DSS', 'SOC2']; missing []; APPROVE WITH CONDITIONS
-PASS messy-mismatch       REFER TO HUMAN            1/1          3s  REFER TO HUMAN
+PASS messy-typo           APPROVE WITH CONDITIONS   55/55       18s  read as HubSpot, assumed=True; APPROVE WITH CONDITIONS
+PASS messy-mismatch       REFER TO HUMAN            1/1          1s  REFER TO HUMAN
 PASS messy-fake           REFER TO HUMAN            1/1          0s  REFER TO HUMAN
-PASS messy-dead           REFER TO HUMAN            18/18       52s  REFER TO HUMAN
-PASS messy-typo           APPROVE WITH CONDITIONS   55/55      102s  read as HubSpot, assumed=True; APPROVE WITH CONDITIONS
+PASS messy-dead           REFER TO HUMAN            18/18       17s  REFER TO HUMAN
+PASS cert-gitlab          APPROVE WITH CONDITIONS   34/34      144s  claimed ['ISO27001', 'PCI_DSS', 'SOC2']; missing []; APPROVE WITH CONDITIONS
 
 15 of 15 passed
   breach: 5 of 5

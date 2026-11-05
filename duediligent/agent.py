@@ -45,10 +45,17 @@ def _compact(text: str) -> str:
     return normalize(text).replace(" ", "")
 
 
-def _names_match(query: str, cand: dict) -> bool:
+def _names_match(query: str, cand: dict) -> int:
+    """1: same name. 2: website is the name. 3: name starts with it. 0: no match."""
     q, name = normalize(query), normalize(cand.get("name") or "")
     stem = _compact((cand.get("domain") or "").split(".")[0])
-    return bool(q) and (name == q or name.startswith(q + " ") or stem == _compact(query))
+    if not q:
+        return 0
+    if name == q:
+        return 1
+    if stem == _compact(query):
+        return 2
+    return 3 if name.startswith(q + " ") else 0
 
 
 def _discover_domain(crust: Crust, store: EvidenceStore, query: str, emit: Emit) -> str | None:
@@ -122,7 +129,12 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
     # No spelling guesses: a near-miss name is a different company (C3iHub is not Cxihub).
     # A record matches when its name is the query, starts with it ("C3iHub, IIT Kanpur"),
     # or its website is the query ("c3ihub.org"). The model may correct an obvious typo first.
-    pool = [c for c in candidates if _names_match(query, c)]
+    # Strongest evidence first, so "Okta Partners" never competes with an exact "Okta".
+    pool = []
+    for tier in (1, 2, 3):
+        pool = [c for c in candidates if _names_match(query, c) == tier]
+        if pool:
+            break
     if not pool:
         # "GitLab SaaS" names a product of GitLab: accept a record that is the request's first word.
         words = normalize(query).split()

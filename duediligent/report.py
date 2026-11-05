@@ -1,0 +1,170 @@
+"""Render the finished assessment. Every line is built from verified findings."""
+from __future__ import annotations
+
+import html
+import re
+
+CERT_NAMES = {"SOC2_TYPE2": "SOC 2 Type II", "SOC2": "SOC 2", "ISO27001": "ISO 27001", "ISO27701": "ISO 27701",
+              "PCI_DSS": "PCI DSS", "HIPAA": "HIPAA", "FEDRAMP": "FedRAMP", "OTHER": "Other"}
+STATUS = {"current_claim": "Claimed as current", "in_progress": "In progress", "mention_only": "Mentioned only"}
+
+
+def cite(ids: list[str] | None) -> str:
+    return " ".join(f"[{e}]" for e in ids or [])
+
+
+def _title(r: dict) -> str:
+    i = r["identity"]
+    return i.get("name") or r["intake"].get("vendor_name") or r["intake"].get("domain") or "Unidentified vendor"
+
+
+def vendor_email(r: dict) -> str | None:
+    """A draft for the buyer to send. The agent never sends it."""
+    conditions = r["decision"]["conditions"]
+    needs_docs = [c for c in conditions if c["rule"].startswith(("R4", "R5", "R6"))]
+    if not needs_docs:
+        return None
+    name = _title(r)
+    asks = []
+    if any(c["rule"].startswith("R5") for c in needs_docs):
+        asks.append("Your current SOC 2 Type II report or ISO 27001 certificate, under NDA if needed")
+    if any(c["rule"].startswith("R4") for c in needs_docs):
+        asks.append("Your post-incident report and the remediation completed for the incident(s) listed below")
+    if any(c["rule"].startswith("R6") for c in needs_docs):
+        asks.append("The legal entity that would sign our contract, and your data-return terms on exit")
+    lines = [f"Subject: Security review information request: {name}", "", f"Hello {name} security team,", "",
+             "We are completing a vendor security review and need the following to proceed:", ""]
+    lines += [f"- {a}" for a in asks]
+    incidents = [i for i in r.get("incidents", []) if i.get("date")][:3]
+    if any(c["rule"].startswith("R4") for c in needs_docs) and incidents:
+        lines += ["", "Incidents we found in public sources:"] + [f"- {i['date']}: {i['summary']}" for i in incidents]
+    lines += ["", "Thank you."]
+    return "\n".join(lines)
+
+
+def to_markdown(r: dict) -> str:
+    d = r["decision"]
+    out = [f"# Vendor security assessment: {_title(r)}", "",
+           f"**Decision: {d['outcome']}**", "",
+           f"- Request: {r['request']}",
+           f"- Reviewed: {r['reviewed_at']}",
+           f"- Data sensitivity assumed: {r['sensitivity']}",
+           f"- Citations verified: {r['audit']['verified']} of {r['audit']['total']}", ""]
+
+    def section(title: str, rows: list[dict]) -> None:
+        if rows:
+            out.extend([f"## {title}", ""])
+            out.extend(f"- {x['text']} {cite(x['evidence'])} *({x['rule']})*" for x in rows)
+            out.append("")
+
+    section("Why", d["reasons"])
+    section("Needs a person", d["referrals"])
+    section("Conditions", d["conditions"])
+    section("Notes", d["notes"])
+
+    out.extend(["## Incidents", ""])
+    if r["incidents"]:
+        for i in r["incidents"]:
+            fix = "remediation reported" if i.get("remediated") else "no remediation found"
+            out.append(f"- **{i.get('date') or 'Date unknown'}**: {i['summary']} ({fix}) {cite(i['evidence'])}")
+            out.extend(f"  - \"{q['quote']}\" [{q['evidence']}]" for q in i.get("quotes", []) if q.get("quote"))
+    else:
+        searched = cite(r["coverage"].get("search_evidence"))
+        out.append(f"No public breach found in the sources searched. That does not prove there were none. {searched}")
+    out.append("")
+
+    out.extend(["## Certifications", ""])
+    if r["certifications"]:
+        for c in r["certifications"]:
+            out.append(f"- **{CERT_NAMES.get(c['framework'], c['framework'])}**: {STATUS.get(c['status'], c['status'])} {cite(c['evidence'])}")
+            out.extend(f"  - \"{q['quote']}\" [{q['evidence']}]" for q in c.get("quotes", [])[:1])
+    else:
+        out.append(f"No certification statement found publicly. {cite(r['coverage'].get('search_evidence'))}")
+    out.append("")
+
+    for kind, title in (("leader", "Who runs it"), ("control", "Published controls"), ("posture", "Passive checks"), ("stability", "Company facts")):
+        rows = [f for f in r["findings"] if f["kind"] == kind and f["verified"]]
+        if rows:
+            out.extend([f"## {title}", ""])
+            out.extend(f"- {f['claim']} [{f['evidence_id']}]" for f in rows)
+            out.append("")
+
+    if r.get("vendor_email"):
+        out.extend(["## Draft request to the vendor (not sent)", "", "```", r["vendor_email"], "```", ""])
+
+    if r["coverage"].get("failed_urls"):
+        out.extend(["## Pages that could not be read", ""])
+        out.extend(f"- {u}" for u in r["coverage"]["failed_urls"])
+        out.append("")
+
+    out.extend(["## Evidence", ""])
+    out.extend(f"- **{e['id']}** ({e['kind']}) {e['title']} | {e['source']} | {e['retrieved_at']}" for e in r["evidence"])
+    out.extend(["", "*Based on public information only. It does not replace a contractual security review.*"])
+    return "\n".join(out)
+
+
+def _inline(text: str, ev_links: bool = True) -> str:
+    text = html.escape(text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"(?<!\*)\*\(([^*]+)\)\*", r'<span class="rule">(\1)</span>', text)
+    text = re.sub(r"(?<!\*)\*([^*]+)\*", r"<em>\1</em>", text)
+    if ev_links:
+        text = re.sub(r"\[(E\d+)\]", r'<a class="cite" href="#\1">\1</a>', text)
+    return text
+
+
+def markdown_body(md: str) -> str:
+    out, in_list, in_code = [], False, False
+    for line in md.split("\n"):
+        if line.startswith("```"):
+            if in_list:
+                out.append("</ul>")
+                in_list = False
+            out.append("</pre>" if in_code else "<pre>")
+            in_code = not in_code
+            continue
+        if in_code:
+            out.append(html.escape(line))
+            continue
+        item = re.match(r"^(\s*)- (.*)$", line)
+        if item:
+            if not in_list:
+                out.append("<ul>")
+                in_list = True
+            cls = ' class="quote"' if item.group(1) else ""
+            body = _inline(item.group(2))
+            ev = re.match(r"<strong>(E\d+)</strong>", body)
+            anchor = f' id="{ev.group(1)}"' if ev else ""
+            out.append(f"<li{cls}{anchor}>{body}</li>")
+            continue
+        if in_list:
+            out.append("</ul>")
+            in_list = False
+        if line.startswith("# "):
+            out.append(f"<h1>{_inline(line[2:])}</h1>")
+        elif line.startswith("## "):
+            out.append(f"<h2>{_inline(line[3:])}</h2>")
+        elif line.strip():
+            out.append(f"<p>{_inline(line)}</p>")
+    if in_list:
+        out.append("</ul>")
+    return "\n".join(out)
+
+
+REPORT_CSS = """
+:root{--bg:#fff;--fg:#17181c;--mut:#62656e;--line:#e3e4e8;--accent:#2b4fd8;--ok:#116b3a;--warn:#8a5a00;--bad:#a81f1f;--ref:#5a3aa8}
+@media (prefers-color-scheme:dark){:root{--bg:#121317;--fg:#ececef;--mut:#9a9da6;--line:#2b2d34;--accent:#8ea5ff;--ok:#5fd08f;--warn:#e5b45a;--bad:#ff8a8a;--ref:#bda6ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,'Segoe UI',sans-serif}
+.report{max-width:800px;margin:0 auto;padding:32px 16px}
+h1{font-size:24px;margin:0 0 12px}h2{font-size:15px;margin:28px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+ul{padding-left:18px;margin:6px 0}li{margin:4px 0;overflow-wrap:anywhere}li.quote{color:var(--mut);list-style:none;font-size:13.5px}
+.rule{color:var(--mut);font-size:12.5px}.cite{font:12px ui-monospace,monospace;color:var(--accent);text-decoration:none}
+pre{white-space:pre-wrap;background:color-mix(in srgb,var(--line) 35%,transparent);padding:12px;border-radius:6px;font-size:13px}
+li:target{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+"""
+
+
+def to_html(r: dict) -> str:
+    return (f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+            f"<title>{html.escape(_title(r))} assessment</title><style>{REPORT_CSS}</style>"
+            f"<div class=report>{markdown_body(to_markdown(r))}</div></html>")

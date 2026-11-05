@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>duediligent</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--fg:#17181c;--mut:#62656e;--line:#e0e1e4;--accent:#2b4fd8;--ok:#116b3a;--warn:#8a5a00;--bad:#a81f1f;--ref:#5a3aa8}
+@media (prefers-color-scheme:dark){:root{--bg:#101114;--panel:#17181d;--fg:#ececef;--mut:#9a9da6;--line:#2b2d34;--accent:#8ea5ff;--ok:#5fd08f;--warn:#e5b45a;--bad:#ff8a8a;--ref:#bda6ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,'Segoe UI',sans-serif}
+main{max-width:860px;margin:0 auto;padding:36px 16px 80px}
+header b{font-size:18px;letter-spacing:-.01em}
+header p{margin:2px 0 18px;color:var(--mut)}
+textarea{width:100%;min-height:76px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:inherit;font:inherit;resize:vertical}
+.row{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+button{padding:9px 16px;border:0;border-radius:7px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+@media (prefers-color-scheme:dark){button{color:#101114}}
+button:disabled{opacity:.5;cursor:default}
+.chip{padding:4px 9px;border:1px solid var(--line);border-radius:6px;background:none;color:var(--mut);font-size:13px;font-weight:400}
+#log{margin-top:22px;font:13px/1.7 ui-monospace,Consolas,monospace;color:var(--mut)}
+#log div.step{color:var(--fg)}#log div.warn{color:var(--warn)}
+#verdict{display:none;margin-top:22px;padding:16px 18px;border:1px solid var(--line);border-left:5px solid var(--c,var(--line));border-radius:8px;background:var(--panel)}
+#verdict strong{display:block;font-size:21px;color:var(--c)}
+#verdict span{color:var(--mut);font-size:13px}
+#report{display:none;margin-top:14px;padding:6px 22px 22px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+#report h1{font-size:19px;margin:16px 0 8px}
+#report h2{font-size:14px;margin:24px 0 6px;padding-top:12px;border-top:1px solid var(--line)}
+#report ul{padding-left:18px;margin:6px 0}#report li{margin:4px 0;overflow-wrap:anywhere}
+#report li.quote{list-style:none;color:var(--mut);font-size:13.5px}
+.rule{color:var(--mut);font-size:12px}.cite{font:12px ui-monospace,monospace;color:var(--accent);text-decoration:none}
+pre{white-space:pre-wrap;padding:12px;border-radius:6px;background:var(--bg);font-size:13px}
+li:target{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+</style>
+</head>
+<body>
+<main>
+  <header><b>duediligent</b><p>Vendor security reviews, finished. Every claim checked against its source.</p></header>
+  <textarea id="q" placeholder="We want to use Acme Corp to store customer personal data. Can we?"></textarea>
+  <div class="row">
+    <button id="go">Review vendor</button>
+    <button class="chip" data-q="Here is a new vendor: Notion, notion.so. We want to keep our internal docs there. Is it safe?">Notion</button>
+    <button class="chip" data-q="We are thinking of putting customer passwords in LastPass. OK?">LastPass</button>
+    <button class="chip" data-q="check out salesforse for our crm with customer data">A typo</button>
+    <button class="chip" data-q="Can we buy from Mercury?">An ambiguous name</button>
+  </div>
+  <div id="log" aria-live="polite"></div>
+  <div id="verdict"><strong id="outcome"></strong><span id="meta"></span></div>
+  <article id="report"></article>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const COLORS = {"APPROVE":"var(--ok)","APPROVE WITH CONDITIONS":"var(--warn)","REJECT":"var(--bad)","REFER TO HUMAN":"var(--ref)"};
+function line(text, cls){ const d=document.createElement('div'); d.className=cls||''; d.textContent=text; $('log').appendChild(d); }
+document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { $('q').value = b.dataset.q; });
+$('go').onclick = () => {
+  const request = $('q').value.trim();
+  if (!request) return;
+  $('go').disabled = true; $('log').textContent = '';
+  $('verdict').style.display = 'none'; $('report').style.display = 'none';
+  const es = new EventSource('/api/review?request=' + encodeURIComponent(request));
+  const finish = () => { es.close(); $('go').disabled = false; };
+  es.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'log' && m.level !== 'done') line(m.message, m.level);
+    if (m.type === 'error') { line(m.message, 'warn'); finish(); }
+    if (m.type === 'result') {
+      $('outcome').textContent = m.outcome;
+      $('verdict').style.setProperty('--c', COLORS[m.outcome] || 'var(--fg)');
+      $('meta').textContent = `${m.audit.verified} of ${m.audit.total} citations verified · ${Math.round(m.elapsed)}s`;
+      $('verdict').style.display = 'block';
+      $('report').innerHTML = m.html; $('report').style.display = 'block';
+      finish();
+    }
+  };
+  es.onerror = () => { line('Connection lost.', 'warn'); finish(); };
+};
+</script>
+</body>
+</html>

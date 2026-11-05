@@ -146,3 +146,51 @@ def test_parse_json_handles_fences_and_prose():
 
 def test_html_to_text_drops_scripts():
     assert "evil" not in html_to_text("<p>hello</p><script>evil()</script>")
+
+
+# End-to-end runs with tools that misbehave. No network and no credits.
+class FakeLLM:
+    def json(self, system, user, max_tokens=2000, retries=1, required=()):
+        return {"vendor_name": "Acme", "corrected_name": None, "domain": None, "purpose": None, "data_sensitivity": "medium"}
+
+
+class NonsenseCrust:
+    calls: list = []
+    notify = staticmethod(lambda message: None)
+
+    def identify(self, name=None, domain=None):
+        return "<html>Bad gateway</html>"
+
+
+class TimeoutCrust(NonsenseCrust):
+    def identify(self, name=None, domain=None):
+        from duediligent.crust import CrustError
+        raise CrustError("/company/identify failed: ReadTimeout")
+
+
+def test_tool_returning_nonsense_ends_in_referral_not_crash():
+    from duediligent.agent import review
+    r = review("Review Acme", crust=NonsenseCrust(), llm=FakeLLM(), save=False)
+    assert r["decision"]["outcome"] == policy.REFER and r["errors"]
+
+
+def test_tool_timing_out_ends_in_referral_not_crash():
+    from duediligent.agent import review
+    r = review("Review Acme", crust=TimeoutCrust(), llm=FakeLLM(), save=False)
+    assert r["decision"]["outcome"] == policy.REFER
+
+
+def test_report_never_implies_a_clean_record_when_nothing_was_searched():
+    from duediligent.agent import review
+    from duediligent.report import to_markdown
+    text = to_markdown(review("Review Acme", crust=TimeoutCrust(), llm=FakeLLM(), save=False))
+    assert "No public breach found" not in text and "Not checked" in text
+
+
+def test_crust_rejects_a_nonsense_identify_response():
+    import pytest
+    from duediligent.crust import Crust, CrustError
+    client = Crust(api_key="test")
+    client.post = lambda path, body: {"unexpected": True}
+    with pytest.raises(CrustError):
+        client.identify(name="Acme")

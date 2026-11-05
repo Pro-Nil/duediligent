@@ -22,6 +22,32 @@ def _title(r: dict) -> str:
     return i.get("name") or r["intake"].get("vendor_name") or r["intake"].get("domain") or "Unidentified vendor"
 
 
+def business_check(r: dict) -> list[str]:
+    """The handbook's question: is this a real, trading business, and since when?"""
+    stab, ident = r.get("stability") or {}, r.get("identity") or {}
+    if ident.get("status") != "resolved" or not stab.get("evidence"):
+        return ["**Could not confirm.** There is no company record to check this against."]
+    ev = cite(stab["evidence"])
+    site = cite((r.get("coverage") or {}).get("site_evidence"))
+    headcount, founded, status = stab.get("headcount"), stab.get("founded"), stab.get("status")
+    reachable = (r.get("coverage") or {}).get("site_reachable")
+    if r.get("closures"):
+        verdict = "**Could not confirm.** The company record and press reports disagree."
+    elif str(status).lower() == "active" and isinstance(headcount, (int, float)) and headcount >= 5 and reachable:
+        verdict = "**Looks real and trading**, based on the evidence below."
+    else:
+        verdict = "**Could not confirm.** The evidence below is incomplete."
+    staff = f"{int(headcount):,}" if isinstance(headcount, (int, float)) else "unknown"
+    lines = [verdict]
+    if founded:
+        lines.append(f"- Founded {founded}, per the company record. {ev}")
+    lines.append(f"- Record status: {status or 'unknown'}. Staff on record: {staff}. {ev}")
+    if stab.get("openings") is not None:
+        lines.append(f"- Open roles on record: {stab['openings']}. {ev}")
+    lines.append(f"- Website {ident.get('domain')}: {'reachable' if reachable else 'could not be reached'}. {site}")
+    return lines
+
+
 def vendor_email(r: dict) -> str | None:
     """A draft for the buyer to send. The agent never sends it."""
     conditions = r["decision"]["conditions"]
@@ -60,6 +86,10 @@ def to_markdown(r: dict) -> str:
             out.extend([f"## {title}", ""])
             out.extend(f"- {x['text']} {cite(x['evidence'])} *({x['rule']})*" for x in rows)
             out.append("")
+
+    out.extend(["## Is it a real, trading business?", ""])
+    out.extend(business_check(r))
+    out.append("")
 
     section("Why", d["reasons"])
     section("Needs a person", d["referrals"])

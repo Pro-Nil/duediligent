@@ -50,6 +50,10 @@ class Crust:
         self._lock = threading.Lock()
         self._sent: dict[str, list[float]] = {}
         self.calls: list[dict] = []
+        self.notify = lambda message: None
+        # Demo switch: the first call to each endpoint times out, to show the retry working.
+        self._fail_once = os.environ.get("DUEDILIGENT_FAULT") == "timeout_once"
+        self._failed: set[str] = set()
 
     def _pace(self, path: str) -> None:
         """Sliding window: a burst is fine until the per-minute limit, then it waits."""
@@ -81,9 +85,13 @@ class Crust:
         for attempt in range(retries + 1):
             self._pace(path)
             try:
+                if self._fail_once and path not in self._failed:
+                    self._failed.add(path)
+                    raise httpx.ReadTimeout("injected timeout")
                 resp = self.client.post(path, json=body)
             except httpx.HTTPError as exc:
                 last = f"{type(exc).__name__}: {exc}"
+                self.notify(f"{path} failed ({type(exc).__name__}), retrying")
                 time.sleep(1.5 * (attempt + 1))
                 continue
             self.calls.append({
@@ -93,11 +101,13 @@ class Crust:
             })
             if resp.status_code == 429:
                 wait = float(resp.headers.get("x-ratelimit-reset") or 5)
+                self.notify(f"{path} rate limited, waiting {wait:.0f}s")
                 time.sleep(min(wait, 60) + random.random())
                 last = "rate limited"
                 continue
             if resp.status_code >= 500:
                 last = f"HTTP {resp.status_code}"
+                self.notify(f"{path} returned {resp.status_code}, retrying")
                 time.sleep(1.5 * (attempt + 1))
                 continue
             if resp.status_code in (401, 402, 403):
@@ -113,9 +123,10 @@ class Crust:
     def identify(self, name: str | None = None, domain: str | None = None) -> list[dict]:
         body = {"domains": [domain]} if domain else {"names": [name]}
         rows = self.post("/company/identify", body)
-        if not isinstance(rows, list) or not rows:
-            return []
-        return rows[0].get("matches") or []
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            raise CrustError("/company/identify returned an unexpected response")
+        matches = rows[0].get("matches") or []
+        return [m for m in matches if isinstance(m, dict)]
 
     def enrich(self, company_id: int | None = None, domain: str | None = None, fields: list[str] | None = None) -> dict | None:
         body: dict[str, Any] = {"fields": fields or ENRICH_FIELDS}
@@ -130,9 +141,10 @@ class Crust:
             if exc.status == 403 and fields is None:
                 return self.enrich(company_id, domain, ["basic_info", "headcount", "funding", "revenue"])
             raise
-        if not isinstance(rows, list) or not rows or not rows[0].get("matches"):
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict) or not rows[0].get("matches"):
             return None
-        return rows[0]["matches"][0].get("company_data")
+        data = rows[0]["matches"][0].get("company_data") if isinstance(rows[0]["matches"][0], dict) else None
+        return data if isinstance(data, dict) else None
 
     def search(self, query: str, sources: list[str], site: str | None = None, start_date: int | None = None) -> list[dict]:
         body: dict[str, Any] = {"query": query, "sources": sources}
@@ -141,10 +153,13 @@ class Crust:
         if start_date:
             body["start_date"] = start_date
         data = self.post("/web/search/live", body)
-        return (data or {}).get("results") or []
+        rows = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise CrustError("/web/search/live returned an unexpected response")
+        return [r for r in rows if isinstance(r, dict)]
 
     def fetch(self, urls: list[str]) -> list[dict]:
         if not urls:
             return []
         rows = self.post("/web/enrich/live", {"urls": urls[:10]})
-        return rows if isinstance(rows, list) else []
+        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []

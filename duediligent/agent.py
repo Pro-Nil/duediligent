@@ -121,6 +121,7 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
     store = EvidenceStore()
     crust = crust or Crust()
     llm = llm or LLM()
+    crust.notify = lambda message: emit("warn", message)
 
     emit("step", "Reading the request")
     intake = extract.parse_request(llm, request)
@@ -194,6 +195,12 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
         errors.append(str(exc))
         emit("warn", f"Model error: {exc}")
         ctx["coverage"] = {"searches_ok": False, "search_evidence": []}
+    except Exception as exc:  # noqa: BLE001 - nonsense from a tool must end in a referral, not a crash
+        errors.append(f"{type(exc).__name__}: {exc}")
+        emit("warn", f"A tool returned something unusable: {type(exc).__name__}")
+        ctx["coverage"] = {"searches_ok": False, "search_evidence": []}
+        if not ctx["identity"]:
+            ctx["identity"] = {"status": "unresolved", "detail": "A tool returned unusable data while identifying the company.", "evidence": []}
 
     emit("step", "Applying the rulebook")
     decision = policy.evaluate(ctx, date.today())
@@ -213,6 +220,7 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
         "incidents": ctx["incidents"],
         "certifications": ctx["certifications"],
         "stability": ctx["stability"],
+        "closures": ctx.get("closures") or [],
         "coverage": {k: v for k, v in ctx["coverage"].items()},
         "findings": [asdict(f) for f in all_findings],
         "rejected_findings": rejected,

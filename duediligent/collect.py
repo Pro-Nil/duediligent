@@ -45,7 +45,7 @@ def canonical_domain(domain: str) -> str:
                 host = registered(str(resp.url))
                 # A marketing subdomain still belongs to the same registered name.
                 return host if host else domain
-    except httpx.HTTPError:
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError):
         return domain
 
 
@@ -182,6 +182,9 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
     return {
         "flags": flags,
         "notes": notes,
+        "founded": founded,
+        "status": status,
+        "openings": dig(company, "hiring.openings_count"),
         "closed": closed,
         "closed_detail": f"The company record shows status \"{status}\"." if closed else None,
         "acquired": acquisition or None,

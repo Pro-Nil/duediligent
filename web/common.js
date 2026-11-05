@@ -266,10 +266,22 @@ function nextCard(s, opts) {
   if (opts.vendorView) return "";
   if (out === "APPROVE WITH CONDITIONS" && s.case_id) {
     const url = `${location.origin}/vendor/${s.case_id}`;
-    return `<section class="card next fade"><div class="eyebrow">Next step</div><h3 style="margin-top:4px">Request documents from the vendor</h3>
-      <p class="mut small" style="margin:0">Send this link. When the vendor uploads an audit report, it is checked and the decision is made again.</p>
-      <div class="row"><input readonly value="${esc(url)}"><button class="btn ghost sm" data-copy="${esc(url)}">Copy</button></div>
-      <div class="row"><a class="btn sm" href="${esc(url)}" target="_blank">Open vendor page</a></div></section>`;
+    const conds = s.report?.decision?.conditions || [];
+    const byDoc = conds.filter(c => c.rule.startsWith("R5")).length;
+    const byPerson = conds.length - byDoc;
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    return `<section class="card next"><div class="eyebrow">Next step · waiting on the vendor</div>
+      <h3 style="margin-top:4px">Ask the vendor for evidence</h3>
+      <p class="small" style="margin:0 0 8px;color:var(--fg-2)">This review can't finish from public information alone. Send the vendor this link:</p>
+      <div class="row" style="margin-top:0"><input readonly value="${esc(url)}" aria-label="Vendor link"><button class="btn ghost sm" data-copy="${esc(url)}">Copy</button></div>
+      <ol class="small" style="margin:12px 0 0;padding-left:18px;color:var(--fg-2)">
+        <li>The vendor sees what's missing.</li>
+        <li>They upload a SOC 2 report, SOC 3 report or ISO 27001 certificate.</li>
+        <li>The agent checks it, cites each fact to its page, and decides again. The new decision shows on the vendor page.</li>
+      </ol>
+      <p class="small mut" style="margin:10px 0 0">${byDoc ? `A valid audit report clears the certification condition.` : `No condition here needs an audit report.`}${byPerson ? ` The other ${byPerson === 1 ? "condition needs" : byPerson + " conditions need"} a person to read the vendor's answer.` : ""}</p>
+      ${local ? `<p class="small mut" style="margin:8px 0 0">Running locally, this link only works on this computer. To try it, open it and act as the vendor.</p>` : ""}
+      <div class="row"><a class="btn sm" href="${esc(url)}" target="_blank">Open as the vendor</a></div></section>`;
   }
   const w = s.watch;
   if (w && ["created", "existing"].includes(w.status)) {

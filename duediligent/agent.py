@@ -88,7 +88,14 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
     corrected = intake.get("corrected_name")
     domain = intake.get("domain")
     if not typed and not domain:
-        return {"status": "unresolved", "detail": "The request does not name a vendor to review.", "evidence": []}
+        why = "The model that reads requests is unavailable, so the vendor could not be identified." if intake.get("model_failed") else "The request does not name a vendor to review."
+        return {"status": "unresolved", "detail": why, "evidence": []}
+
+    if intake.get("request_type") == "other" or intake.get("other_companies"):
+        others = ", ".join(intake.get("other_companies") or [])
+        return {"status": "unresolved", "evidence": [],
+                "detail": "This request is not a review of one vendor" + (f" (it also names {others})" if others else "")
+                          + ". duediligent reviews one supplier at a time, for example: \"Can we use Acme for our payroll data?\""}
 
     query = corrected or typed
     stated_domain = domain
@@ -164,6 +171,17 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
         pool = ranked[:1]
 
     best = pool[0]
+    # An acronym can name a different, better-known body. If its full name has its own record
+    # on another website, the request is ambiguous, so ask instead of picking one.
+    for full in (intake.get("full_names") or [])[:2]:
+        try:
+            others = [c for c in (_slim(m) for m in crust.identify(name=full)) if c["name"] and c["domain"]]
+        except CrustError:
+            continue
+        rival = next((c for c in others if normalize(c["name"]) == normalize(full) and c["domain"] != best["domain"]), None)
+        if rival:
+            return {"status": "unresolved", "input": query, "evidence": [ev.id],
+                    "detail": f"\"{query}\" could mean {best['name']} ({best['domain']}) or {rival['name']} ({rival['domain']}). Please say which one, ideally with its website."}
     typo = bool(typed and corrected and normalize(typed) != normalize(corrected))
     if typo:
         emit("warn", f"Read \"{typed}\" as {best['name']} ({best['domain']}). The report will ask you to confirm.")

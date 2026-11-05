@@ -268,3 +268,25 @@ def test_official_site_found_by_search_when_no_record_has_the_name(monkeypatch):
     crust = DiscoverCrust([("Cxihub", "cxihub.com", "11-50")])
     r = resolve_identity(crust, EvidenceStore(), {"vendor_name": "C3iHub"}, lambda *a: None)
     assert r["status"] == "resolved" and r["domain"] == "c3ihub.org"
+
+
+def test_question_about_two_organisations_is_not_reviewed_as_one_vendor():
+    from duediligent.agent import resolve_identity
+    r = resolve_identity(ListCrust([]), EvidenceStore(), {"vendor_name": "ntro", "request_type": "other", "other_companies": ["c3ihub"]}, lambda *a: None)
+    assert r["status"] == "unresolved" and "not a review of one vendor" in r["detail"]
+
+
+class AcronymCrust(ListCrust):
+    def identify(self, name=None, domain=None):
+        if name == "National Technical Research Organisation":
+            self.rows = [("National Technical Research Organisation", "ntro.gov.in", "1001-5000")]
+        else:
+            self.rows = [("NTRO", "ntro.fi", "2-10")]
+        return super().identify(name, domain)
+
+
+def test_acronym_with_a_better_known_full_name_is_referred():
+    from duediligent.agent import resolve_identity
+    intake = {"vendor_name": "ntro", "full_names": ["National Technical Research Organisation"]}
+    r = resolve_identity(AcronymCrust([]), EvidenceStore(), intake, lambda *a: None)
+    assert r["status"] == "unresolved" and "ntro.gov.in" in r["detail"] and "ntro.fi" in r["detail"]

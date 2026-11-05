@@ -315,3 +315,11 @@ table.mini a { color: inherit; text-decoration: none; }
 form.other { margin-top: 10px; }
 form.other input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--fg); font: 14px var(--sans); }
 .continuing { margin: 0 0 14px; padding: 12px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 6px; font-size: 14px; }
+
+.ask { margin: 16px 0 4px; padding: 16px 18px; border: 1px solid var(--ref); border-radius: var(--radius); background: var(--ref-soft); }
+.ask-q { font-size: 17px; font-weight: 600; }
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.choices .choice { margin: 0; background: var(--surface); }
+.ask form.other input { background: var(--surface); }
+
+.ask.answered { border-color: var(--accent); background: var(--accent-soft); }

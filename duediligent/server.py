@@ -26,6 +26,15 @@ load_env()
 app = FastAPI(title="duediligent")
 WEB = Path(__file__).resolve().parent.parent / "web"
 app.mount("/web", StaticFiles(directory=WEB), name="web")
+
+
+@app.middleware("http")
+async def always_fresh(request, call_next):
+    """Pages and scripts change often, so browsers must check for a newer copy every time."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 SEVERITY = {"REJECT": 0, "REFER TO HUMAN": 1, "APPROVE WITH CONDITIONS": 2, "APPROVE": 3}
 MAX_UPLOAD = 15 * 1024 * 1024
 

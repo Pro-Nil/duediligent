@@ -391,3 +391,13 @@ def test_a_confirmed_website_without_a_record_is_reviewed_from_the_web():
 def test_ambiguous_names_offer_every_candidate():
     r = resolve([("Mercury", "mercury.com", "1001-5000"), ("Mercury", "mercuryeng.com", "1001-5000")], "Mercury")
     assert {o["domain"] for o in r["options"]} == {"mercury.com", "mercuryeng.com"}
+
+
+def test_a_name_plus_description_matches_the_named_record():
+    r = resolve([("C3iHub, IIT Kanpur", "c3ihub.org", "201-500"), ("Transportation Security Administration (TSA)", "tsa.gov", "10001+")], "c3ihub security")
+    assert r["status"] == "resolved" and r["domain"] == "c3ihub.org"
+
+
+def test_choices_offered_are_only_plausible_ones():
+    r = resolve([("Zentrix Labs", "zentrixlabs.com", "11-50"), ("Security Bank Corporation", "securitybank.com", "5001-10000")], "zentri security")
+    assert r["status"] == "unresolved" and [o["domain"] for o in r["options"]] == ["zentrixlabs.com"]

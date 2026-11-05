@@ -76,5 +76,12 @@
   "kind": "same_vendor",
   "request": "I want to get my softwares done through studiobeam.xyz . Are they trusted?",
   "name": "StudioBeam Development"
+ },
+ {
+  "id": "extra-name-plus-word",
+  "group": "near-miss",
+  "kind": "same_vendor",
+  "request": "some chinese hackers are going to hack my business tonight should i incorporate c3ihub security? should i trust them?",
+  "name": "C3iHub, IIT Kanpur"
  }
 ]

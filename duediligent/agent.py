@@ -164,15 +164,24 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
             break
     if not pool:
         # "GitLab SaaS" names a product of GitLab: accept a record that is the request's first word.
+        # The same holds for "c3ihub security": the first word alone can name the record.
         words = normalize(query).split()
-        pool = [c for c in candidates if len(words) > 1 and normalize(c["name"]) == words[0]]
+        if len(words) > 1:
+            for tier in (1, 2, 3):
+                pool = [c for c in candidates if _names_match(words[0], c) == tier]
+                if pool:
+                    break
     if not pool and not _discovered:
         found = _discover_domain(crust, store, query, emit)
         if found:
             return resolve_identity(crust, store, {**intake, "domain": found}, emit, _discovered=True)
     if not pool:
-        names = ", ".join(f"{c['name']} ({c['domain']})" for c in candidates[:4])
-        return {"status": "unresolved", "input": query, "evidence": [ev.id], "options": _options(candidates[:4]),
+        # Offer only plausible companies: ones sharing the request's first word, if any do.
+        first = _compact(query.split()[0]) if query.split() else ""
+        likely = [c for c in candidates if first and (first in _compact(c["name"]) or first in _compact(c["domain"]))]
+        shown = likely or candidates
+        names = ", ".join(f"{c['name']} ({c['domain']})" for c in shown[:4])
+        return {"status": "unresolved", "input": query, "evidence": [ev.id], "options": _options(shown[:4]),
                 "detail": f"No confident match for \"{query}\". Nearest records: {names}. Please supply the vendor's website."}
 
     # A record whose website has nothing to do with the name is noise when others match it.

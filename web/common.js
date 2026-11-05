@@ -337,6 +337,7 @@ function renderReport(root, s, opts = {}) {
       ${badge(d.outcome)}
     </div>
     <p class="verdict-line">${esc(summarySentence(s))}</p>
+    ${clarifyBlock(s)}
     ${rep.parent ? `<p class="small mut" style="margin:6px 0 0">Re-run after you confirmed the company. <a href="/report/${esc(rep.parent)}">See the original question</a></p>` : ""}
     <div class="quote"><span class="eyebrow">Your request</span><br>“${esc(rep.request)}”</div>
     <div class="stats">
@@ -395,6 +396,29 @@ function renderReport(root, s, opts = {}) {
   };
 }
 
+/* When the agent could not tell which company was meant, ask right under the reason. */
+function clarifyBlock(s) {
+  const d = s.report?.decision, id = s.report?.identity || {};
+  if (!d || d.outcome !== "REFER TO HUMAN" || !s.case_id) return "";
+  const done = (s.report.history || []).find(h => h.kind === "clarified");
+  if (done) return `<div class="ask answered"><div class="ask-q">You answered: ${esc(done.choice)}</div>
+    <p class="small mut" style="margin:2px 0 10px">The agent re-ran the full review on that company.</p>
+    ${done.child ? `<a class="btn sm" href="/report/${esc(done.child)}">Open the new review</a>` : ""}</div>`;
+  if (!d.referrals.some(r => r.rule.startsWith("R1")) || /not a review of one vendor/.test(id.detail || "")) return "";
+  const opts = id.options || [];
+  const size = e => !e ? "" : /\d/.test(e) ? `${esc(e)} staff` : /myself/i.test(e) ? "one person" : esc(e);
+  const go = (name, domain) => `/new?clarify=${encodeURIComponent(s.case_id)}&name=${encodeURIComponent(name || "")}&domain=${encodeURIComponent(domain || "")}`;
+  return `<div class="ask" id="clarify">
+    <div class="ask-q">Which company did you mean?</div>
+    <p class="small mut" style="margin:2px 0 10px">Pick one, or enter its website. The agent then reviews exactly that company in full.</p>
+    ${opts.length ? `<div class="choices">${opts.map(o => `<a class="choice" href="${go(o.name, o.domain)}"><b>${esc(o.name)}</b><span>${esc(o.domain)}${o.employees ? " · " + size(o.employees) : ""}</span></a>`).join("")}</div>` : ""}
+    <form class="other" data-case="${esc(s.case_id)}">
+      <label class="small mut" for="other-domain">${opts.length ? "Not listed? " : ""}The vendor's website</label>
+      <div class="row" style="margin-top:4px;display:flex;gap:8px"><input id="other-domain" name="domain" placeholder="vendor.com" required><button class="btn sm" type="submit">Review this company</button></div>
+    </form>
+  </div>`;
+}
+
 function showTab(root, k) {
   root.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === k));
   root.querySelectorAll("[data-panel]").forEach(p => p.classList.toggle("hide", p.dataset.panel !== k));
@@ -442,20 +466,7 @@ function nextCard(s, opts) {
     if (done) return `<section class="card next"><div class="eyebrow">Answered</div><h3 style="margin-top:4px">You confirmed ${esc(done.choice)}</h3>
       <p class="small mut" style="margin:0 0 10px">The agent re-ran the review on that company.</p>
       ${done.child ? `<a class="btn sm" href="/report/${esc(done.child)}">Open the new review</a>` : ""}</section>`;
-    const id = s.report?.identity || {};
-    const isIdentity = (s.report?.decision?.referrals || []).some(r => r.rule.startsWith("R1"));
-    if (isIdentity && s.case_id && !/not a review of one vendor/.test(id.detail || "")) {
-      const opts = id.options || [];
-      const go = (name, domain) => `/new?clarify=${encodeURIComponent(s.case_id)}&name=${encodeURIComponent(name || "")}&domain=${encodeURIComponent(domain || "")}`;
-      return `<section class="card next" id="clarify"><div class="eyebrow">Next step · your answer</div>
-        <h3 style="margin-top:4px">Help the agent decide</h3>
-        <p class="small" style="margin:0 0 10px;color:var(--fg-2)">It wasn't sure which company you mean, so it didn't guess. Pick one, and it reviews that company in full.</p>
-        ${opts.map(o => `<a class="choice" href="${go(o.name, o.domain)}"><b>${esc(o.name)}</b><span>${esc(o.domain)}${o.employees ? ` · ${/\d/.test(o.employees) ? esc(o.employees) + " staff" : /myself/i.test(o.employees) ? "one person" : esc(o.employees)}` : ""}</span></a>`).join("")}
-        <form class="other" data-case="${esc(s.case_id)}">
-          <label class="small mut" for="other-domain">${opts.length ? "None of these? " : ""}Enter the vendor's website</label>
-          <div class="row" style="margin-top:4px"><input id="other-domain" name="domain" placeholder="vendor.com" required><button class="btn sm" type="submit">Review it</button></div>
-        </form></section>`;
-    }
+    if (clarifyBlock(s)) return "";  // the question is shown at the top of the report instead
     return `<section class="card next"><div class="eyebrow">Next step</div><h3 style="margin-top:4px">A person decides</h3><p class="mut small" style="margin:0">The agent stopped rather than guess. The reason is on the left.</p></section>`;
   }
   return "";

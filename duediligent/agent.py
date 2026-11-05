@@ -174,6 +174,16 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
             hibp, _ = collect.breach_db(store, domain, emit)
             web = collect.gather_web(crust, store, name, domain, dig(company or {}, "news"), emit)
 
+            if company:
+                leaders, unconfirmed = collect.confirm_leaders(crust, store, name, ctx["stability"]["evidence"][0],
+                                                               ctx["stability"].get("leader_candidates") or [], emit)
+                all_findings += leaders
+                emit("info", f"Confirmed {len(leaders)} leaders against a web search; left out {unconfirmed} unconfirmed self-reported profiles.")
+                if ctx["stability"].get("leader_candidates") and not leaders:
+                    ctx["stability"].setdefault("notes", []).append({
+                        "text": "The record lists senior people, but no independent source confirmed any of them, so this report names no one.",
+                        "evidence": ctx["stability"]["evidence"]})
+
             pages = web["trust_pages"] + web["breach_pages"]
             emit("step", f"Analysing {len(pages)} pages and checking every quote")
             aliases = [domain.split(".")[0]]

@@ -126,7 +126,7 @@ def to_markdown(r: dict) -> str:
         out.append(f"No certification statement found publicly. {cite(r['coverage'].get('search_evidence'))}")
     out.append("")
 
-    for kind, title in (("leader", "Who runs it (self-reported profiles)"), ("control", "Published controls"), ("posture", "Passive checks"), ("stability", "Company facts")):
+    for kind, title in (("leader", "Who runs it"), ("control", "Published controls"), ("posture", "Passive checks"), ("stability", "Company facts")):
         rows = [f for f in r["findings"] if f["kind"] == kind and f["verified"]]
         if kind == "control":
             grouped: dict[str, list[str]] = {}
@@ -136,7 +136,7 @@ def to_markdown(r: dict) -> str:
                     ids.append(f["evidence_id"])
             lines = [f"{name} {cite(ids)}" for name, ids in grouped.items()]
         elif kind == "leader":
-            lines = [f"{f['value']}: {f['claim']} [{f['evidence_id']}]" for f in rows]
+            lines = [f"{f['value']}, {f['claim']} [{f['evidence_id']}], confirmed by web search [{f['attrs'].get('confirmed_by')}]" for f in rows]
         else:
             lines = [f"{f['claim']} [{f['evidence_id']}]" for f in rows]
         if lines:

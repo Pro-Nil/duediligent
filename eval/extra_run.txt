@@ -1,0 +1,14 @@
+PASS extra-closed-convoy  REFER TO HUMAN            1/1         10s  REFER TO HUMAN
+PASS extra-lookalike      REFER TO HUMAN            1/1         10s  REFER TO HUMAN
+PASS extra-ambiguous-mercury REFER TO HUMAN            1/1         10s  REFER TO HUMAN
+PASS extra-closed-quibi   REFER TO HUMAN            15/15       50s  REFER TO HUMAN
+PASS extra-small-honest   APPROVE WITH CONDITIONS   22/22       84s  read as Crustdata (YC F24); APPROVE WITH CONDITIONS
+PASS reword-1             APPROVE WITH CONDITIONS   32/32      119s  read as Cloudflare; sensitivity medium; APPROVE WITH CONDITIONS
+PASS reword-2             APPROVE WITH CONDITIONS   30/30      117s  read as Cloudflare; sensitivity medium; APPROVE WITH CONDITIONS
+PASS reword-3             APPROVE WITH CONDITIONS   37/37       76s  read as Cloudflare; sensitivity low; APPROVE WITH CONDITIONS
+
+8 of 8 passed
+  closed: 2 of 2
+  fake: 2 of 2
+  honest: 1 of 1
+  reworded: 3 of 3

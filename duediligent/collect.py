@@ -126,41 +126,7 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
     if isinstance(acquisition, str) and acquisition.lower() in ("none", "operating", "independent", "not acquired", "n/a"):
         acquisition = None
 
-    for group in ("cxos", "decision_makers"):
-        people = dig(company, f"people.{group}") or []
-        if not isinstance(people, list):
-            continue
-        hit = next((i for i, p in enumerate(people[:300]) if SECURITY_TITLE.search(str(dig(p, "basic_profile.current_title") or ""))), None)
-        if hit is not None:
-            fact(f"people.{group}.{hit}.basic_profile.name", f"Security leader on record ({dig(people[hit], 'basic_profile.current_title')})", "leader")
-            break
-
-    # Who runs it. Profiles are self-reported, so strangers can claim "Founder". Rank chief
-    # executives first, then by audience, and label the result as listed rather than proven.
-    listed: list[tuple[float, str, int]] = []
-    for group in ("founders", "cxos"):
-        people = dig(company, f"people.{group}") or []
-        if not isinstance(people, list):
-            continue
-        for i, person in enumerate(people[:60]):
-            title = str(dig(person, "basic_profile.current_title") or "")
-            if not dig(person, "basic_profile.name"):
-                continue
-            reach = 0.0
-            for key in ("professional_network.followers", "professional_network.num_followers", "professional_network.connections"):
-                value = dig(person, key)
-                if isinstance(value, (int, float)):
-                    reach = max(reach, float(value))
-            score = reach + (1e9 if re.search(r"ceo|chief executive", title, re.I) else 0)
-            listed.append((score, group, i))
-    seen_people: set[str] = set()
-    for _, group, i in sorted(listed, key=lambda row: row[0], reverse=True):
-        who = dig(company, f"people.{group}.{i}.basic_profile.name")
-        if who in seen_people or len(seen_people) >= 3:
-            continue
-        seen_people.add(who)
-        title = dig(company, f"people.{group}.{i}.basic_profile.current_title") or group
-        fact(f"people.{group}.{i}.basic_profile.name", f"Listed as {str(title)[:80]}", "leader")
+    leaders = leader_candidates(company)
 
     closed = isinstance(status, str) and bool(re.search(r"closed|defunct|inactive|out of business|dissolved", status, re.I))
     flags = []
@@ -171,7 +137,7 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
         flags.append({"text": f"The company is young (founded {founded}). Confirm it can meet its support and continuity commitments.", "evidence": [ev_id]})
     if isinstance(headcount, (int, float)) and headcount < 5:
         flags.append({"text": f"Only {int(headcount)} staff on record. Confirm this is a trading business with real operations.", "evidence": [ev_id]})
-    if not seen_people:
+    if not leaders:
         flags.append({"text": "The company record names no founder or executive. Ask who runs the business.", "evidence": [ev_id]})
     notes = []
     size_band = re.findall(r"\d[\d,]*", str(dig(company, "basic_info.employee_count_range") or ""))
@@ -191,7 +157,48 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
         "headcount": headcount,
         "headcount_yoy": yoy,
         "evidence": [ev_id],
+        "leader_candidates": leaders,
     }, facts
+
+
+LEADER_TITLE = re.compile(r"\bceo\b|chief executive|founder|\bciso\b|chief (information )?security|\bcto\b|chief technology", re.I)
+
+
+def leader_candidates(company: dict) -> list[dict]:
+    """People the record lists in senior roles. Profiles are self-reported, so these are
+    only candidates until another source names them."""
+    rows, seen = [], set()
+    for group in ("cxos", "founders", "decision_makers"):
+        people = dig(company, f"people.{group}") or []
+        if not isinstance(people, list):
+            continue
+        for i, person in enumerate(people[:300]):
+            name = dig(person, "basic_profile.name")
+            title = str(dig(person, "basic_profile.current_title") or ("Founder" if group == "founders" else ""))
+            if not name or name in seen or not LEADER_TITLE.search(title):
+                continue
+            seen.add(name)
+            rows.append({"name": name, "title": title[:90], "path": f"people.{group}.{i}.basic_profile.name"})
+    return rows[:25]
+
+
+def confirm_leaders(crust: Crust, store: EvidenceStore, vendor: str, record_ev: str, candidates: list[dict], log) -> tuple[list[Finding], int]:
+    """Keep a listed leader only when an independent web search names them too."""
+    if not candidates:
+        return [], 0
+    rows, search_ev = _safe_search(crust, store, log, f'"{vendor}" CEO founder CISO leadership team', ["web", "news"])
+    text = normalize(" ".join(f"{r.get('title')} {r.get('snippet')}" for r in rows))
+    found: list[Finding] = []
+    for cand in candidates:
+        if len(found) >= 4:
+            break
+        name = normalize(cand["name"])
+        if search_ev and len(name.split()) >= 2 and name in text:
+            f = Finding(kind="leader", claim=cand["title"], evidence_id=record_ev, path=cand["path"], value=cand["name"],
+                        attrs={"confirmed_by": search_ev})
+            if store.verify(f):
+                found.append(f)
+    return found, len(candidates) - len(found)
 
 
 def passive_checks(store: EvidenceStore, domain: str) -> tuple[bool, list[Finding], str]:

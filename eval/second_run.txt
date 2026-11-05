@@ -1,0 +1,20 @@
+PASS breach-twilio        APPROVE WITH CONDITIONS   54/54       25s  flagged years [2022, 2024], expected any of [2022]; APPROVE WITH CONDITIONS
+PASS breach-circleci      APPROVE WITH CONDITIONS   56/56       48s  flagged years [2019, 2022], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
+PASS breach-okta          APPROVE WITH CONDITIONS   55/55       65s  flagged years [2022, 2023, 2026], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
+PASS breach-dropbox       APPROVE WITH CONDITIONS   48/48      110s  flagged years [2024], expected any of [2022, 2024]; APPROVE WITH CONDITIONS
+PASS cert-datadog         APPROVE WITH CONDITIONS   54/54       83s  claimed ['FEDRAMP', 'HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS breach-powerschool   APPROVE WITH CONDITIONS   56/56      108s  flagged years [2024, 2025], expected any of [2024, 2025]; APPROVE WITH CONDITIONS
+PASS cert-asana           APPROVE WITH CONDITIONS   81/81       57s  claimed ['HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS cert-zapier          APPROVE WITH CONDITIONS   40/40       72s  claimed ['SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS cert-gitlab          APPROVE                   32/32      124s  claimed ['ISO27001', 'PCI_DSS', 'SOC2']; missing []; APPROVE
+PASS messy-ambiguous      REFER TO HUMAN            1/1         11s  REFER TO HUMAN
+PASS cert-figma           APPROVE WITH CONDITIONS   31/31       70s  claimed ['FEDRAMP', 'ISO27001', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+PASS messy-mismatch       REFER TO HUMAN            1/1          8s  REFER TO HUMAN
+PASS messy-fake           REFER TO HUMAN            1/1          9s  REFER TO HUMAN
+PASS messy-typo           APPROVE WITH CONDITIONS   45/45       92s  read as HubSpot, assumed=True; APPROVE WITH CONDITIONS
+PASS messy-dead           REFER TO HUMAN            20/20       62s  REFER TO HUMAN
+
+15 of 15 passed
+  breach: 5 of 5
+  cert: 5 of 5
+  messy: 5 of 5

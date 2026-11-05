@@ -217,6 +217,8 @@ def review(request: str, emit: Emit | None = None, crust: Crust | None = None, l
     crust = crust or Crust()
     llm = llm or LLM()
     crust.notify = lambda message: emit("warn", message)
+    if getattr(llm, "backend", None) == "cli":
+        llm.on_wait = lambda seconds: emit("wait", f"Still waiting for the model: {seconds}s so far. Calls through the claude CLI are sometimes slow; an Anthropic API key in .env makes reviews faster.")
 
     emit("step", "Reading the request")
     intake = extract.parse_request(llm, request)
@@ -392,7 +394,10 @@ def apply_document(case_id: str, data: bytes, filename: str, emit: Emit | None =
     ctx = result["ctx"]
     ident = ctx["identity"]
     emit("step", f"Reading {filename}")
-    doc = documents.check_document(llm or LLM(), store, data, filename, ident.get("name") or "", ident.get("domain") or "")
+    llm = llm or LLM()
+    if getattr(llm, "backend", None) == "cli":
+        llm.on_wait = lambda seconds: emit("wait", f"Still waiting for the model: {seconds}s so far. Calls through the claude CLI are sometimes slow.")
+    doc = documents.check_document(llm, store, data, filename, ident.get("name") or "", ident.get("domain") or "")
     if doc.get("readable"):
         emit("info", f"{doc['report_type']} for {doc['organisation']}, period ending {doc.get('period_end') or doc.get('valid_until') or 'unconfirmed'}, opinion {doc['opinion']}")
     else:

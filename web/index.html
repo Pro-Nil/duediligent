@@ -69,7 +69,15 @@ function runStream(url) {
   const finish = () => { es.close(); $("go").disabled = false; $("go").textContent = "Review vendor"; };
   es.onmessage = e => {
     const m = JSON.parse(e.data);
+    if (m.type === "log" && m.level === "wait") {
+      // One line that updates, so a slow model call reads as waiting, not stuck.
+      let w = $("feed").querySelector(".waiting");
+      if (!w) { w = document.createElement("div"); w.className = "warn waiting"; $("feed").appendChild(w); }
+      w.textContent = m.message; stages.detail(m.message.split(".")[0] + ".");
+      return;
+    }
     if (m.type === "log" && m.level !== "done") {
+      $("feed").querySelector(".waiting")?.classList.remove("waiting");
       line(m.message, m.level === "step" ? "step-line" : m.level === "warn" ? "warn" : "");
       if (m.level === "step") stages.step(m.message); else stages.detail(m.message, m.level === "warn");
     }

@@ -78,7 +78,15 @@ $("send").onclick = async () => {
   const line = (t, cls) => { const d = document.createElement("div"); d.className = cls || ""; d.textContent = t; $("feed").appendChild(d); };
   const body = new FormData(); body.append("file", file);
   await postStream(`/api/case/${caseId}/document`, body, m => {
+    if (m.type === "log" && m.level === "wait") {
+      // One line that updates, so a slow model call reads as waiting, not stuck.
+      let w = $("feed").querySelector(".waiting");
+      if (!w) { w = document.createElement("div"); w.className = "warn waiting"; $("feed").appendChild(w); }
+      w.textContent = m.message; stages.detail(m.message.split(".")[0] + ".");
+      return;
+    }
     if (m.type === "log" && m.level !== "done") {
+      $("feed").querySelector(".waiting")?.classList.remove("waiting");
       line(m.message, m.level === "step" ? "step-line" : m.level === "warn" ? "warn" : "");
       if (m.level === "step") stages.step(m.message); else stages.detail(m.message, m.level === "warn");
     }

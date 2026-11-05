@@ -6,12 +6,16 @@ import os
 import re
 import shutil
 import subprocess
+import threading
+import time
 import tempfile
 from pathlib import Path
 
 from . import cache
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
+CLI_TIMEOUT = 150  # seconds before one CLI call is abandoned and retried
+WAIT_STEP = 15  # seconds between "still waiting" notices
 
 
 class LLMError(Exception):
@@ -39,6 +43,9 @@ class LLM:
         self.model = model or os.environ.get("DUEDILIGENT_MODEL", DEFAULT_MODEL)
         self.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self.cli = shutil.which("claude")
+        self.on_wait = None  # called with the seconds waited when a model call is slow
+        self._lock = threading.Lock()
+        self._last_wait = 0.0
         if self.api_key:
             import anthropic
 
@@ -70,16 +77,41 @@ class LLM:
             prompt_file = Path(tmp) / "system.txt"
             prompt_file.write_text(system, encoding="utf-8")
             try:
-                proc = subprocess.run(
+                proc = subprocess.Popen(
                     [self.cli, "-p", "--model", "sonnet", "--tools", "", "--system-prompt-file", str(prompt_file),
                      "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands"],
-                    input=user, capture_output=True, text=True, encoding="utf-8", timeout=240, cwd=tmp,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, encoding="utf-8", cwd=tmp,
                 )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                raise LLMError(f"claude CLI failed: {exc}") from exc
+            except OSError as exc:
+                raise LLMError(f"claude CLI failed to start: {exc}") from exc
+            # Wait in short steps, so the person watching hears that the call is slow, not stuck.
+            started, pending_input = time.monotonic(), user
+            while True:
+                try:
+                    out, err = proc.communicate(input=pending_input, timeout=WAIT_STEP)
+                    break
+                except subprocess.TimeoutExpired:
+                    pending_input = None
+                    waited = int(time.monotonic() - started)
+                    if waited >= CLI_TIMEOUT:
+                        proc.kill()
+                        proc.communicate()
+                        raise LLMError(f"the claude CLI did not answer within {CLI_TIMEOUT} seconds")
+                    self._waiting(waited)
         if proc.returncode != 0:
-            raise LLMError(f"claude CLI exited {proc.returncode}: {proc.stderr[:300]}")
-        return proc.stdout
+            raise LLMError(f"claude CLI exited {proc.returncode}: {err[:300]}")
+        return out
+
+    def _waiting(self, seconds: int) -> None:
+        """Report a slow call at most once per step, however many calls run at once."""
+        with self._lock:
+            now = time.monotonic()
+            if now - self._last_wait < WAIT_STEP - 1:
+                return
+            self._last_wait = now
+        if self.on_wait:
+            self.on_wait(seconds)
 
     def json(self, system: str, user: str, max_tokens: int = 2000, retries: int = 1, required: tuple[str, ...] = ()) -> dict:
         cached = cache.get("llm", [system, user])

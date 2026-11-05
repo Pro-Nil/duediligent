@@ -94,7 +94,13 @@ def batch_page() -> FileResponse:
 
 
 @app.get("/report/{case_id}")
-def report_page(case_id: str) -> HTMLResponse:
+def report_page(case_id: str) -> FileResponse:
+    _case(case_id)
+    return FileResponse(WEB / "report.html")
+
+
+@app.get("/report/{case_id}/print")
+def report_print(case_id: str) -> HTMLResponse:
     return HTMLResponse((_case(case_id) / "report.html").read_text(encoding="utf-8"))
 
 
@@ -108,6 +114,7 @@ def _case(case_id: str) -> Path:
 @app.get("/api/case/{case_id}")
 def case_info(case_id: str) -> dict:
     result = json.loads((_case(case_id) / "report.json").read_text(encoding="utf-8"))
+    result["case_id"] = case_id
     out = _summary(result)
     out["vendor_email"] = result.get("vendor_email")
     out["case_url"] = f"/vendor/{case_id}"
@@ -151,6 +158,7 @@ async def upload_document(case_id: str, file: UploadFile = File(...)) -> Streami
     def worker() -> None:
         try:
             result = apply_document(case_id, data, name, emit)
+            result["case_id"] = case_id
             events.put({"type": "result", **_summary(result)})
         except Exception as exc:  # noqa: BLE001
             events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})

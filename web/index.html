@@ -17,7 +17,7 @@
   </div>
 
   <section class="card composer">
-    <textarea id="q" placeholder="We want to store customer personal data in Acme Corp, acme.com. Is it safe?" aria-label="Review request"></textarea>
+    <textarea id="q" placeholder="For example: We want to store customer personal data in Acme Corp, acme.com. Is it safe?" aria-label="Review request"></textarea>
     <div class="bar">
       <div class="examples"><span>Try</span>
         <button class="chip" data-q="Here is a new vendor: Notion, notion.so. We want to keep our internal docs there. Is it safe?">Notion</button>
@@ -30,6 +30,19 @@
     </div>
   </section>
 
+  <div class="how" style="margin-top:14px" aria-label="How it works">
+    <div><span class="n">01</span><b>Name the vendor</b>Its website makes identification certain. Say what data it would handle: that sets how strict the review is.</div>
+    <div><span class="n">02</span><b>It gathers evidence</b>Company records, breach news, the vendor's own trust pages and passive security checks. About 1 to 3 minutes.</div>
+    <div><span class="n">03</span><b>Every fact is checked</b>A fact counts only if its quote appears word for word in the saved source. Click any E number to see it.</div>
+    <div><span class="n">04</span><b>A rulebook decides</b>Not the model. Where something is missing, you get a vendor link to collect their audit report.</div>
+  </div>
+
+  <details class="help">
+    <summary>What the four decisions mean</summary>
+    <div id="legend"></div>
+  </details>
+
+
   <div class="run hide" id="run">
     <section class="card steps" id="steps" aria-label="Progress"></section>
     <section class="card feed" id="feed" aria-live="polite"></section>
@@ -40,6 +53,7 @@
 <script src="/web/common.js"></script>
 <script>
 topbar("review");
+$("legend").innerHTML = legendHTML();
 document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; $("q").focus(); });
 $("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("go").click(); });
 
@@ -48,6 +62,7 @@ $("go").onclick = () => {
   if (!request) { $("q").focus(); return; }
   $("go").disabled = true; $("go").textContent = "Reviewing…";
   $("result").innerHTML = ""; $("feed").innerHTML = ""; $("run").classList.remove("hide");
+  document.querySelectorAll(".how, details.help").forEach(el => el.classList.add("hide"));
   const stages = makeStages($("steps"));
   const line = (t, cls) => { const d = document.createElement("div"); d.className = cls || ""; d.textContent = t; $("feed").appendChild(d); $("feed").scrollTop = 1e9; };
   const es = new EventSource("/api/review?request=" + encodeURIComponent(request));

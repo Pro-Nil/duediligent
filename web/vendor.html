@@ -20,7 +20,13 @@
 
   <section class="card pad" style="margin-top:14px">
     <h3>Upload your audit report</h3>
-    <p class="mut small" style="margin:0 0 12px">A SOC 2 Type II report, a SOC 3 report or an ISO 27001 certificate, as a text PDF up to 15 MB. It is checked automatically: the organisation, audit period, auditor and opinion are each read from the document and cited to their page.</p>
+    <p class="mut small" style="margin:0 0 8px">A SOC 2 Type II report, a SOC 3 report or an ISO 27001 certificate, as a text PDF up to 15 MB. It is checked automatically, and each of these is read from the document and cited to its page:</p>
+    <div class="grid2 small" style="margin:0 0 12px">
+      <div class="tile"><b>Organisation</b><div class="k">Must be the vendor under review</div></div>
+      <div class="tile"><b>Audit period</b><div class="k">Must have ended within the last 12 months</div></div>
+      <div class="tile"><b>Auditor</b><div class="k">The independent firm that signed it</div></div>
+      <div class="tile"><b>Opinion</b><div class="k">Must be unqualified, with exceptions listed</div></div>
+    </div>
     <label class="drop" id="drop">
       <input type="file" id="file" accept="application/pdf">
       <div><b id="dropt">Drop a PDF here, or choose a file</b><span class="mut small" id="drops">Nothing is shared outside this review.</span></div>

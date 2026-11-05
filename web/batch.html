@@ -13,19 +13,27 @@
   <div class="lede">
     <div class="eyebrow">Supplier register</div>
     <h1>Review every supplier at once</h1>
-    <p>Upload your supplier list. Each vendor gets a full review, and the register is ranked from riskiest to safest.</p>
+    <p>Upload your supplier list. Each vendor gets the same full review as a single request, and the register is ranked from riskiest to safest. Click any row to see every issue and what to do about it.</p>
   </div>
 
+  <details class="help">
+    <summary>What the decisions mean</summary>
+    <div id="legend"></div>
+  </details>
+
   <section class="card pad">
+    <h3>1. Choose your supplier list</h3>
+    <p class="mut small" style="margin:0 0 12px">A CSV file with a <code>vendor</code> column. Optional columns: <code>domain</code> (the vendor's website, which makes identification certain) and <code>purpose</code> (what you use it for, which sets how strict the review is). Up to 50 rows.</p>
     <label class="drop" id="drop">
       <input type="file" id="file" accept=".csv,text/csv">
-      <div><b id="dropt">Drop a CSV here, or choose a file</b>
-        <span class="mut small" id="drops">A <code>vendor</code> column, with optional <code>domain</code> and <code>purpose</code> columns. Up to 50 rows.</span></div>
+      <div><b id="dropt">Drop a CSV here, or click to choose a file</b>
+        <span class="mut small" id="drops">Example row: <code>Okta,okta.com,single sign-on for all staff</code></span></div>
     </label>
     <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
       <a class="btn ghost sm" href="/web/sample_vendors.csv" download>Download a sample list</a>
       <button class="btn ghost sm" id="usesample">Use the sample list</button>
-      <button class="btn push" id="go" disabled>Review all</button>
+      <span class="push mut small" id="eta"></span>
+      <button class="btn" id="go" disabled>2. Review all</button>
     </div>
     <div class="progress hide" id="bar"><i id="barfill"></i></div>
   </section>
@@ -33,18 +41,33 @@
   <div class="summary-bar hide" id="counts"></div>
 
   <section class="card hide" id="tablecard" style="margin-top:6px">
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search vendors or issues" aria-label="Search vendors or issues">
+      <span class="mut small" id="shown"></span>
+      <button class="btn ghost sm push" id="expandall">Expand all</button>
+      <button class="btn ghost sm" id="dl">Download CSV</button>
+    </div>
     <div class="tablewrap"><table>
-      <thead><tr><th>Vendor</th><th>Decision</th><th>Main reason</th><th>Citations</th><th></th></tr></thead>
+      <thead><tr>
+        <th>Vendor</th>
+        <th>Decision</th>
+        <th><abbr title="The most important issue. Click the row to see all of them.">Top issue</abbr></th>
+        <th><abbr title="Claims re-checked against the saved source, out of all claims in the report.">Verified</abbr></th>
+        <th></th>
+      </tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
   </section>
-  <div style="display:flex;margin-top:12px"><button class="btn ghost sm push hide" id="dl">Download register as CSV</button></div>
 </main>
 <script src="/web/common.js"></script>
 <script>
 topbar("batch");
-let file = null, rows = [], total = 0;
-const pick = f => { if (!f) return; file = f; $("dropt").textContent = f.name; $("drops").textContent = `${(f.size / 1024).toFixed(1)} KB · ready`; $("go").disabled = false; };
+$("legend").innerHTML = legendHTML();
+let file = null, rows = [], total = 0, filter = null, query = "", open = new Set();
+const pick = f => {
+  if (!f) return;
+  file = f; $("dropt").textContent = f.name; $("drops").textContent = `${(f.size / 1024).toFixed(1)} KB · ready to review`; $("go").disabled = false;
+};
 $("file").onchange = () => pick($("file").files[0]);
 ["dragenter", "dragover"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.add("over"); }));
 ["dragleave", "drop"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.remove("over"); }));
@@ -52,39 +75,112 @@ $("drop").addEventListener("drop", e => pick(e.dataTransfer.files[0]));
 $("usesample").onclick = async () => { const b = await fetch("/web/sample_vendors.csv").then(r => r.blob()); pick(new File([b], "sample_vendors.csv", {type: "text/csv"})); };
 
 const ORDER = ["REJECT", "REFER TO HUMAN", "APPROVE WITH CONDITIONS", "APPROVE"];
+const key = r => String(r.index);
+const issueCount = r => { const d = r.report?.decision; return d ? d.referrals.length + d.conditions.length + d.reasons.filter(x => !x.rule.startsWith("R7")).length : 0; };
+const text = r => [r.vendor, r.domain, r.input?.purpose, r.top_reason, ...(r.report ? [...r.report.decision.conditions, ...r.report.decision.referrals, ...r.report.decision.notes].map(x => x.text) : [])].join(" ").toLowerCase();
+
+function detailHTML(r) {
+  if (!r.report) return `<p class="empty">${esc(r.top_reason)}</p>`;
+  const rep = r.report, bc = businessCheck(rep);
+  const vendorLink = r.case_id ? `${location.origin}/vendor/${r.case_id}` : "";
+  return `<div class="detail-grid">
+    <div>
+      <p class="verdict-line" style="margin-top:12px">${esc(summarySentence(r))}</p>
+      ${issuesHTML(rep.decision, false)}
+    </div>
+    <div class="detail-side">
+      <div class="tile"><div class="k">Is it a real, trading business?</div>
+        <div style="margin:4px 0 6px"><span class="pill" style="--c:${bc.ok ? "var(--ok)" : "var(--warn)"};--cs:${bc.ok ? "var(--ok-soft)" : "var(--warn-soft)"}">${esc(bc.verdict)}</span></div>
+        ${bc.facts.length ? `<dl class="kv small">${bc.facts.slice(0, 4).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : `<span class="small mut">${esc(bc.text)}</span>`}
+      </div>
+      <div class="tile small">
+        <div class="k">Evidence</div>
+        ${(rep.incidents || []).length} incidents · ${(rep.certifications || []).filter(c => c.status === "current_claim").length} certifications claimed · ${(rep.evidence || []).length} sources saved
+      </div>
+      ${r.case_id ? `<a class="btn sm" href="/report/${r.case_id}" target="_blank">Open the full report, with sources</a>` : ""}
+      ${r.outcome === "APPROVE WITH CONDITIONS" && vendorLink ? `<div class="tile small"><div class="k">Ask the vendor for evidence</div>
+        Send this link. The vendor uploads an audit report, and the review is decided again.
+        <div class="row" style="display:flex;gap:6px;margin-top:8px"><input readonly value="${esc(vendorLink)}" style="flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);color:var(--fg);font:12px var(--mono)"><button class="btn ghost sm" data-copy="${esc(vendorLink)}">Copy</button></div>
+        <a href="${esc(vendorLink)}" target="_blank" style="display:inline-block;margin-top:8px">Open as the vendor ↗</a></div>` : ""}
+    </div></div>`;
+}
+
 function render() {
   rows.sort((a, b) => a.severity - b.severity || String(a.vendor).localeCompare(String(b.vendor)));
-  $("rows").innerHTML = rows.map(r => `<tr>
-    <td><b>${esc(r.vendor)}</b><div class="mut small">${[r.domain || r.input?.domain, r.input?.purpose].filter(Boolean).map(esc).join(" · ")}</div></td>
-    <td>${badge(r.outcome)}</td>
-    <td class="reason"><div title="${esc(r.top_reason)}">${esc(r.top_reason)}</div></td>
-    <td class="mono small mut">${r.audit ? `${r.audit.verified}/${r.audit.total}` : ""}</td>
-    <td class="act">${r.case_id ? `<a class="btn ghost sm" href="/report/${r.case_id}" target="_blank">Report</a>${r.outcome === "APPROVE WITH CONDITIONS" ? ` <a class="btn ghost sm" href="/vendor/${r.case_id}" target="_blank">Vendor link</a>` : ""}` : ""}</td>
-  </tr>`).join("");
+  const visible = rows.filter(r => (!filter || r.outcome === filter) && (!query || text(r).includes(query)));
+  $("rows").innerHTML = visible.map(r => {
+    const k = key(r), isOpen = open.has(k), n = issueCount(r);
+    return `<tr class="rowmain ${isOpen ? "open" : ""}" data-k="${k}" tabindex="0" aria-expanded="${isOpen}">
+      <td><span class="chev">›</span><b>${esc(r.vendor)}</b><div class="mut small" style="padding-left:18px">${[r.domain || r.input?.domain, r.input?.purpose].filter(Boolean).map(esc).join(" · ")}</div></td>
+      <td>${badge(r.outcome)}</td>
+      <td class="reason"><div>${esc(r.top_reason)}</div>${n > 1 ? `<span class="more">${isOpen ? "Showing" : "+"} ${isOpen ? "all " + n + " issues" : (n - 1) + " more issue" + (n > 2 ? "s" : "")}</span>` : ""}</td>
+      <td class="mono small mut">${r.audit ? `${r.audit.verified}/${r.audit.total}` : ""}</td>
+      <td class="act"><span class="small mut">${isOpen ? "Hide" : "Details"}</span></td>
+    </tr>${isOpen ? `<tr class="detail"><td colspan="5">${detailHTML(r)}</td></tr>` : ""}`;
+  }).join("") || `<tr><td colspan="5" class="empty">No vendors match.</td></tr>`;
+
   const n = o => rows.filter(r => r.outcome === o).length;
   $("counts").innerHTML = `<div class="stat"><b>${rows.length}/${total}</b><span>Reviewed</span></div>` +
-    ORDER.map(o => `<div class="stat" style="border-left:3px solid ${deco(o).c}"><b>${n(o)}</b><span>${deco(o).label}</span></div>`).join("");
+    ORDER.map(o => `<button class="stat filter ${filter === o ? "on" : ""}" data-f="${o}" style="border-left:3px solid ${deco(o).c}" title="${esc(deco(o).help)} Click to show only these.">
+      <b>${n(o)}</b><span>${deco(o).label}</span></button>`).join("") +
+    (filter ? `<button class="btn ghost sm" id="clearf" style="align-self:center">Show all</button>` : "");
+  $("shown").textContent = rows.length ? `${visible.length} of ${rows.length} shown` : "";
+  $("expandall").textContent = visible.length && visible.every(r => open.has(key(r))) ? "Collapse all" : "Expand all";
   $("tablecard").classList.toggle("hide", !rows.length);
   $("barfill").style.width = total ? `${(100 * rows.length / total).toFixed(0)}%` : "0";
 }
+
+$("rows").addEventListener("click", e => {
+  const copy = e.target.closest("[data-copy]");
+  if (copy) { navigator.clipboard?.writeText(copy.dataset.copy); copy.textContent = "Copied"; setTimeout(() => copy.textContent = "Copy", 1400); return; }
+  if (e.target.closest("a, input, button")) return;
+  const tr = e.target.closest("tr.rowmain");
+  if (!tr) return;
+  open.has(tr.dataset.k) ? open.delete(tr.dataset.k) : open.add(tr.dataset.k);
+  render();
+});
+$("rows").addEventListener("keydown", e => {
+  const tr = e.target.closest("tr.rowmain");
+  if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); tr.click(); }
+});
+$("counts").addEventListener("click", e => {
+  if (e.target.closest("#clearf")) { filter = null; render(); return; }
+  const f = e.target.closest("[data-f]");
+  if (f) { filter = filter === f.dataset.f ? null : f.dataset.f; render(); }
+});
+$("search").oninput = () => { query = $("search").value.trim().toLowerCase(); render(); };
+$("expandall").onclick = () => {
+  const visible = rows.filter(r => (!filter || r.outcome === filter) && (!query || text(r).includes(query)));
+  const all = visible.every(r => open.has(key(r)));
+  visible.forEach(r => all ? open.delete(key(r)) : open.add(key(r)));
+  render();
+};
+
 $("go").onclick = async () => {
   if (!file) return;
-  rows = []; total = 0;
-  $("go").disabled = true; $("go").textContent = "Reviewing…"; $("dl").classList.add("hide");
-  $("bar").classList.remove("hide"); $("counts").classList.remove("hide"); render();
+  rows = []; total = 0; open = new Set(); filter = null;
+  $("go").disabled = true; $("go").textContent = "Reviewing…";
+  $("bar").classList.remove("hide"); $("counts").classList.remove("hide");
+  $("eta").textContent = "A new vendor takes 1 to 3 minutes. Vendors reviewed in the last day are much faster.";
+  render();
   const body = new FormData(); body.append("file", file);
   await postStream("/api/batch", body, m => {
     if (m.type === "start") { total = m.total; render(); }
     if (m.type === "row") { rows.push(m); render(); }
     if (m.type === "error") $("drops").textContent = m.message;
-    if (m.type === "done") $("dl").classList.remove("hide");
+    if (m.type === "done") $("eta").textContent = `Done. ${rows.length} vendors reviewed.`;
   });
-  $("go").disabled = false; $("go").textContent = "Review all";
+  $("go").disabled = false; $("go").textContent = "2. Review all";
 };
+
 $("dl").onclick = () => {
   const q = s => `"${String(s ?? "").replace(/"/g, '""')}"`;
-  const lines = [["vendor", "domain", "decision", "main_reason", "citations_verified", "report"].join(",")]
-    .concat(rows.map(r => [r.vendor, r.domain, r.outcome, r.top_reason, r.audit ? `${r.audit.verified}/${r.audit.total}` : "", r.case_id ? `${location.origin}/report/${r.case_id}` : ""].map(q).join(",")));
+  const lines = [["vendor", "domain", "decision", "issues", "citations_verified", "report"].join(",")]
+    .concat(rows.map(r => {
+      const d = r.report?.decision;
+      const issues = d ? [...d.referrals, ...d.reasons.filter(x => !x.rule.startsWith("R7")), ...d.conditions].map(x => x.text).join(" | ") : r.top_reason;
+      return [r.vendor, r.domain, r.outcome, issues, r.audit ? `${r.audit.verified}/${r.audit.total}` : "", r.case_id ? `${location.origin}/report/${r.case_id}` : ""].map(q).join(",");
+    }));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([lines.join("\n")], {type: "text/csv"}));
   a.download = "supplier-register.csv"; a.click();

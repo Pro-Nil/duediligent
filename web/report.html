@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vendor review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<main class="page">
+  <div class="lede" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+    <div><div class="eyebrow">Saved review</div><h1 id="title" style="margin-bottom:0">Loading…</h1></div>
+    <a class="btn ghost sm push" id="print" target="_blank">Printable version</a>
+  </div>
+  <div id="result"></div>
+</main>
+<script src="/web/common.js"></script>
+<script>
+topbar("");
+const caseId = location.pathname.split("/").pop();
+$("print").href = `/report/${caseId}/print`;
+fetch(`/api/case/${caseId}`).then(r => { if (!r.ok) throw new Error("This review was not found."); return r.json(); }).then(c => {
+  document.title = `${c.vendor} · vendor review`;
+  $("title").textContent = c.vendor;
+  renderReport($("result"), c);
+}).catch(e => { $("title").textContent = e.message; });
+</script>
+</body>
+</html>

@@ -1,10 +1,24 @@
 // Shared UI: top bar, decision styles, event streams, and the report renderer with its source drawer.
 const DECISIONS = {
-  "APPROVE": {c: "var(--ok)", cs: "var(--ok-soft)", label: "Approve", say: "No rule found a blocking issue."},
-  "APPROVE WITH CONDITIONS": {c: "var(--warn)", cs: "var(--warn-soft)", label: "Approve with conditions", say: "Usable once the conditions below are met."},
-  "REJECT": {c: "var(--bad)", cs: "var(--bad-soft)", label: "Reject", say: "A rule found a blocking issue."},
-  "REFER TO HUMAN": {c: "var(--ref)", cs: "var(--ref-soft)", label: "Refer to a person", say: "The agent will not guess here. A person should decide."},
-  "ERROR": {c: "var(--bad)", cs: "var(--bad-soft)", label: "Error", say: ""},
+  "APPROVE": {c: "var(--ok)", cs: "var(--ok-soft)", label: "Approve", say: "No rule found a blocking issue.",
+    help: "Safe to use for the stated purpose. Nothing needs doing first."},
+  "APPROVE WITH CONDITIONS": {c: "var(--warn)", cs: "var(--warn-soft)", label: "Approve with conditions", say: "Usable once the conditions below are met.",
+    help: "Usable, but only after each listed condition is met, for example a current audit report."},
+  "REJECT": {c: "var(--bad)", cs: "var(--bad-soft)", label: "Reject", say: "A rule found a blocking issue.",
+    help: "Do not use. A rule found a blocking issue, such as a recent breach with no public fix."},
+  "REFER TO HUMAN": {c: "var(--ref)", cs: "var(--ref-soft)", label: "Refer to a person", say: "The agent will not guess here. A person should decide.",
+    help: "The agent stopped rather than guess: the name was ambiguous, sources disagreed, or data was missing."},
+  "ERROR": {c: "var(--bad)", cs: "var(--bad-soft)", label: "Error", say: "", help: "The review could not run."},
+};
+// Who can clear each kind of issue, so the reader knows what to do next.
+const CLEARS = {
+  R1: "You: confirm which company you mean",
+  R2: "A person: confirm the company still operates",
+  R3: "Re-run the review, or a person checks manually",
+  R4: "The vendor's written answer, read by a person",
+  R5: "The vendor's audit report (upload on the vendor page)",
+  R6: "You: confirm the contracting entity",
+  R8: "You: ask the vendor",
 };
 const COLORS = Object.fromEntries(Object.entries(DECISIONS).map(([k, v]) => [k, v.c]));
 const RULES = {R1: "Identity", R2: "Viability", R3: "Coverage", R4: "Incident", R5: "Certification", R6: "Stability", R7: "Outcome", R8: "Business check"};
@@ -131,9 +145,48 @@ function businessCheck(rep) {
   return {ok, verdict: ok ? "Looks real and trading" : "Could not confirm", text: (rep.closures || []).length ? "The company record and press reports disagree." : ok ? "Active record, real staff and a live website." : "Some evidence is missing or weak.", facts};
 }
 
-function reasonItems(list, style) {
-  return list.map(r => `<div class="item"><span class="${style === "box" ? "box" : "dot"}" style="--c:${style}"></span><div>
-    <div>${esc(r.text)} ${cites(r.evidence)}</div><div class="rule">${esc(ruleName(r.rule))}</div></div></div>`).join("");
+function reasonItems(list, style, showClears = true) {
+  return list.map(r => {
+    const code = (r.rule || "").split(" ")[0];
+    const clears = showClears && style !== "var(--mut)" && CLEARS[code];
+    return `<div class="item"><span class="${style === "box" ? "box" : "dot"}" style="--c:${style}"></span><div>
+    <div>${esc(r.text)} ${cites(r.evidence)}</div>
+    <div class="meta"><span class="rule">${esc(ruleName(r.rule))}</span>${clears ? ` · <span class="clears">Cleared by: ${esc(clears)}</span>` : ""}</div></div></div>`;
+  }).join("");
+}
+
+/* Every issue in a decision, grouped in the order a reader should act on them. */
+function issuesHTML(d, withCites = true) {
+  const strip = list => withCites ? list : list.map(r => ({...r, evidence: []}));
+  const groups = [
+    ["Needs a person", strip(d.referrals || []), "var(--ref)"],
+    ["Blocking issues", strip((d.reasons || []).filter(r => !r.rule.startsWith("R7"))), "var(--bad)"],
+    ["Conditions to meet", strip(d.conditions || []), "box"],
+    ["Notes", strip(d.notes || []), "var(--mut)"],
+  ].filter(([, l]) => l.length);
+  if (!groups.length) return `<p class="empty">No issues raised.</p>`;
+  return groups.map(([t, l, s]) => `<h4>${t} <span class="count">${l.length}</span></h4>${reasonItems(l, s)}`).join("");
+}
+
+/* One plain sentence that says what the decision means for this vendor. */
+function summarySentence(s) {
+  const d = s.report.decision, name = s.vendor || "This vendor";
+  const n = d.conditions.length;
+  if (d.outcome === "APPROVE") return `${name} can be used for this purpose. No rule raised a blocking issue${d.notes.length ? `, and there ${d.notes.length === 1 ? "is 1 note" : `are ${d.notes.length} notes`} worth reading` : ""}.`;
+  if (d.outcome === "APPROVE WITH CONDITIONS") {
+    const cert = d.conditions.some(c => c.rule.startsWith("R5"));
+    const docs = (s.report.documents || []).length;
+    const tail = !cert ? "" : docs ? "The vendor's audit report was checked but does not yet meet the certification requirement." : "An audit report from the vendor clears the certification condition.";
+    return `${name} can be used once ${n === 1 ? "1 condition is" : `${n} conditions are`} met. ${tail}`;
+  }
+  if (d.outcome === "REJECT") return `Do not use ${name}. ${(d.reasons.find(r => !r.rule.startsWith("R7")) || {}).text || ""}`;
+  if (d.outcome === "REFER TO HUMAN") return `The agent stopped rather than guess. ${(d.referrals[0] || {}).text || ""}`;
+  return "";
+}
+
+function legendHTML() {
+  return `<div class="legend">${["APPROVE", "APPROVE WITH CONDITIONS", "REFER TO HUMAN", "REJECT"].map(o =>
+    `<div class="lg">${badge(o)}<span>${esc(deco(o).help)}</span></div>`).join("")}</div>`;
 }
 
 function renderReport(root, s, opts = {}) {
@@ -151,10 +204,6 @@ function renderReport(root, s, opts = {}) {
   const posture = (rep.findings || []).filter(f => f.kind === "posture");
   const facts = (rep.findings || []).filter(f => f.kind === "stability");
 
-  const why = d.referrals.length ? reasonItems(d.referrals, "var(--ref)") : "";
-  const rejects = reasonItems(d.reasons.filter(r => !r.rule.startsWith("R7")), "var(--bad)");
-  const conds = reasonItems(d.conditions, "box");
-  const notes = reasonItems(d.notes, "var(--mut)");
 
   const tabs = [
     ["summary", "Summary", ""],
@@ -202,25 +251,23 @@ function renderReport(root, s, opts = {}) {
       <div><h2>${esc(name)}</h2><div class="sub">${id.domain ? `<a href="https://${esc(id.domain)}" target="_blank" rel="noopener">${esc(id.domain)}</a> · ` : ""}Data sensitivity: ${esc(rep.sensitivity)} · ${esc(fmtDate(rep.reviewed_at))}</div></div>
       ${badge(d.outcome)}
     </div>
-    <div class="quote">“${esc(rep.request)}”</div>
+    <p class="verdict-line">${esc(summarySentence(s))}</p>
+    <div class="quote"><span class="eyebrow">Your request</span><br>“${esc(rep.request)}”</div>
     <div class="stats">
-      <div class="stat"><b>${rep.audit.verified}/${rep.audit.total}</b><span>Citations verified</span></div>
-      <div class="stat"><b>${(rep.evidence || []).length}</b><span>Sources saved</span></div>
-      <div class="stat"><b>${(rep.incidents || []).length}</b><span>Incidents found</span></div>
-      <div class="stat"><b>${certCount}</b><span>Certifications claimed</span></div>
-      <div class="stat"><b>${d.conditions.length}</b><span>Conditions</span></div>
+      <div class="stat" title="Every claim and every reason was re-checked against the saved source. This is how many passed."><b>${rep.audit.verified}/${rep.audit.total}</b><span>Citations verified</span></div>
+      <div class="stat" title="Pages, searches and records saved as evidence. See the Evidence tab."><b>${(rep.evidence || []).length}</b><span>Sources saved</span></div>
+      <div class="stat" title="Breaches or security incidents found in public reports. See the Incidents tab."><b>${(rep.incidents || []).length}</b><span>Incidents found</span></div>
+      <div class="stat" title="Certifications the vendor publicly claims to hold, such as SOC 2 or ISO 27001."><b>${certCount}</b><span>Certifications claimed</span></div>
+      <div class="stat" title="Things that must happen before the vendor is used. See the Summary tab."><b>${d.conditions.length}</b><span>Conditions</span></div>
     </div>
   </section>
   <div class="report">
     <section class="card fade">
       <div class="tabs">${tabs.map(([k, t, n], i) => `<button data-tab="${k}" class="${i ? "" : "on"}">${t}${n !== "" ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>
       <div class="panel" data-panel="summary">
-        <h4>Decision</h4><p style="margin:0 0 6px">${badge(d.outcome)} <span class="mut small" style="margin-left:6px">${esc(dc.say)}</span></p>
-        ${why ? `<h4>Needs a person</h4>${why}` : ""}
-        ${rejects ? `<h4>Blocking issues</h4>${rejects}` : ""}
-        ${conds ? `<h4>Conditions to meet</h4>${conds}` : ""}
-        ${notes ? `<h4>Notes</h4>${notes}` : ""}
-        ${!why && !rejects && !conds && !notes ? `<p class="empty">No issues raised.</p>` : ""}
+        <h4>Decision</h4><p style="margin:0 0 6px">${badge(d.outcome)} <span class="mut small" style="margin-left:6px">${esc(dc.help)}</span></p>
+        ${issuesHTML(d)}
+        <p class="hint">Tip: click any <span class="cite" style="cursor:default">E</span> number to see the saved source and the exact quote behind a claim.</p>
         ${rep.vendor_email ? `<details><summary>Draft information request to the vendor</summary><pre>${esc(rep.vendor_email)}</pre></details>` : ""}
       </div>
       <div class="panel hide" data-panel="incidents"><h4>Incidents</h4>${incidents}</div>
@@ -243,7 +290,7 @@ function renderReport(root, s, opts = {}) {
         <p style="margin:2px 0 10px"><span class="pill" style="--c:${bc.ok ? "var(--ok)" : "var(--warn)"};--cs:${bc.ok ? "var(--ok-soft)" : "var(--warn-soft)"}">${esc(bc.verdict)}</span> <span class="mut small">${esc(bc.text)}</span></p>
         ${bc.facts.length ? `<dl class="kv">${bc.facts.map(([k, v, e]) => `<dt>${esc(k)}</dt><dd>${esc(v)} ${cites(e)}</dd>`).join("")}</dl>` : ""}
       </section>
-      ${s.case_id ? `<a class="btn ghost" href="/report/${esc(s.case_id)}" target="_blank">Open printable report</a>` : ""}
+      ${s.case_id ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn ghost sm" href="/report/${esc(s.case_id)}" target="_blank" title="A permanent link to this review">Permanent link</a><a class="btn ghost sm" href="/report/${esc(s.case_id)}/print" target="_blank">Printable version</a></div>` : ""}
     </aside>
   </div>`;
 

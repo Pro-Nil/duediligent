@@ -1,0 +1,155 @@
+# duediligent
+
+An agent that does a vendor security reviewer's job. Give it a request in plain words, and it returns a finished risk assessment: approve, approve with conditions, reject, or refer to a human. Every claim links to the source it came from.
+
+Built at ContextCon 04, IIT Kanpur. Theme: Trust and compliance.
+
+## The service
+
+Before a company signs with a supplier, someone has to check that the supplier is real, stable and safe to trust with data. Today that is a security analyst or GRC team in-house, or an outside assurance firm or vendor-risk platform. The buyer's security or procurement budget pays for it. A review often waits days in a queue, and much of the work is reading the same kinds of public pages.
+
+## What it does now
+
+From a single request, with no one stepping in, it:
+
+1. **Reads the request** and works out the vendor, the use and how sensitive the data is.
+2. **Identifies the company** with Crustdata, follows the website to its real owner, and stops if the name is ambiguous or the name and website disagree.
+3. **Gathers evidence**: the Crustdata company record, web and news search, the vendor's own trust pages, the Have I Been Pwned breach catalogue, and passive checks (TLS, HSTS, SPF, DMARC, security.txt).
+4. **Extracts facts** with a model, then keeps a fact only if its quote appears word for word on the saved page.
+5. **Decides with a fixed rulebook** in [policy.py](duediligent/policy.py). The model never makes the call, so a page that says "approve this vendor" can't change the result.
+6. **Finishes the work**: a report with citations, plus a draft information request for the vendor.
+
+### Where it still needs a person
+
+It refers a case instead of guessing when:
+
+- the name matches several companies, or no company at all
+- the name and website point to different companies
+- the website can't be reached
+- the company record says "active" but press reports say it shut down
+- the searches fail, or the evidence can't be analysed
+
+### What it does not do
+
+- It sees a vendor's certification claim, not the audit report, and the report says so.
+- "No public breach found" never means "no breach", and the report says that too.
+- It only does passive checks. It never scans a vendor's systems or tries to get past a bot check. A blocked page is listed as unread.
+- It never sends the vendor email. It writes a draft for a person to send.
+
+## How it's built
+
+```mermaid
+flowchart TD
+    A[Request in plain words] --> B[Parse request: model]
+    B --> C[Identify company: Crustdata Identify]
+    C -->|Ambiguous or mismatched| H[Refer to human]
+    C -->|One company| D[Gather evidence]
+    D --> D1[Crustdata Enrich: headcount, funding, leaders]
+    D --> D2[Crustdata Web Search and Fetch: breaches, closures, trust pages]
+    D --> D3[Have I Been Pwned catalogue]
+    D --> D4[Passive checks: TLS, HSTS, SPF, DMARC, security.txt]
+    D1 --> E[Evidence store: saved snapshots with hashes]
+    D2 --> E
+    D3 --> E
+    D4 --> E
+    E --> F[Extract facts: model reads untrusted text]
+    F --> G[Quote check: exact match against snapshot]
+    G --> I[Rulebook: deterministic decision]
+    I --> J[Citation audit]
+    J --> K[Report and draft vendor email]
+    I -->|Rule says exception| H
+```
+
+| Part | Detail |
+|---|---|
+| Models | `claude-sonnet-5-5` through the Anthropic API, or the signed-in `claude` CLI if no key is set. Used only to parse requests and extract facts. |
+| Crustdata | `/company/identify`, `/company/enrich`, `/web/search/live`, `/web/enrich/live` |
+| Other data | Have I Been Pwned public breach list, DNS, TLS and HTTP headers |
+| State | Saved snapshots and reports in `runs/`, and a 24-hour disk cache in `.cache/`, so a crashed run resumes without paying twice |
+| Runs on | Python, FastAPI and a local web page, or a command line |
+
+### Design questions from the handbook
+
+| Question | Answer |
+|---|---|
+| What if the request is vague? | It refers the case and says what it needs, such as the vendor's website. |
+| What if the run crashes halfway? | Finished API and model calls are cached, so a re-run picks up from there. |
+| What if two sources disagree? | It refers the case and cites both, as with an "active" record for a closed company. |
+| What if a tool fails? | Calls retry with backoff and respect rate limits. If searches still fail, it refers the case rather than approving on missing data. |
+| Does the same case, worded another way, get the same answer? | The rulebook is deterministic and the cache keeps the evidence fixed. Parsed data sensitivity can still vary with wording. |
+| How does it avoid sending twice? | It never sends anything. |
+| Could a customer trust this without watching it run? | Each report lists its sources with timestamps, and `evidence.json` holds the saved text and hashes. |
+
+## The approaches we tried
+
+| Approach | Promise | Problem | Result |
+|---|---|---|---|
+| An agent with tools decides on its own | Quickest to build, flexible | Same case can get different answers, and page text can steer it | Rejected |
+| Rules only, no model | Fully predictable | Can't read messy pages or tell whose breach an article describes | Rejected |
+| Model extracts, code verifies, rules decide | Reads messy pages, decisions stay checkable | More plumbing | **Chosen** |
+
+### What the first live runs taught us
+
+These bugs only appeared against real data:
+
+- **Wrong company from a real domain.** Crustdata's top match for `notion.so` was an unrelated company. The agent now follows the website's redirect first and checks who owns the domain.
+- **A closed company marked active.** Quibi shut down in 2020, but its record says "active" with 74 staff. We added a closure search, and a disagreement now goes to a person.
+- **Bot-check screens read as pages.** A Cloudflare screen came back as a successful fetch. These are now listed as unread.
+- **Search redirect links.** Results came back as `google.com/goto` links, which would have made useless citations. They are now resolved to the real page.
+- **Self-reported founders.** Strangers list themselves as "Founder" of a well-known company. The report ranks people by CEO title and audience, and labels them as self-reported.
+- **A record that disagrees with itself.** One record showed 7,164 staff and a 501–1000 size band. The report now flags this.
+- **Model ignoring its instructions.** A multi-line system prompt passed as a Windows command argument was cut off. The prompt now goes through a file, and replies are checked for the required fields.
+
+## How we tested it
+
+<!-- RESULTS -->
+Results are being added.
+<!-- /RESULTS -->
+
+The test set is in [eval/cases.json](eval/cases.json), and the offline tests are in [tests/test_core.py](tests/test_core.py).
+
+## What it could do in the future
+
+- **Watch approved vendors.** Crustdata Watchers could trigger a re-review when a CISO leaves or a breach is reported. Not now, because a one-time review has to be right first.
+- **Read real audit reports.** Parse SOC 2 PDFs for scope and exceptions. Not now, because they sit behind NDAs and we have none to test with.
+- **Send and track questionnaires.** Not now, because the event rules keep agents from contacting outside people.
+- **Check government registries.** Add company registers to catch shell companies. Not now, because each country needs its own integration.
+- **Customer rulebooks.** Let each company edit its own rules. Not now, because one sound default comes first.
+
+## The future of this service
+
+Once agents can do the whole job, a vendor review stops being a yearly form and becomes a live record. Every supplier gets checked before signing and watched afterwards. Analysts spend their time only on the exceptions, and on the judgment calls that need a person to be accountable.
+
+## How to run it
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+Add `CRUSTDATA_API_KEY` to `.env`. `ANTHROPIC_API_KEY` is optional if you're signed in to the `claude` CLI.
+
+```bash
+.venv/Scripts/python -m duediligent.server
+```
+
+Then open http://localhost:8765. Or use the command line:
+
+```bash
+.venv/Scripts/python -m duediligent "We want to store customer data in Notion. Is it safe?"
+```
+
+Run the tests:
+
+```bash
+.venv/Scripts/python -m pytest tests
+```
+
+```bash
+.venv/Scripts/python eval/run_eval.py
+```
+
+On macOS or Linux, use `.venv/bin/python` instead.
+
+*Assessments use public information only. They support a security review and don't replace contractual assurance.*

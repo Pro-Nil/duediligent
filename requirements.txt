@@ -1,0 +1,7 @@
+anthropic
+httpx
+beautifulsoup4
+dnspython
+fastapi
+uvicorn
+pytest

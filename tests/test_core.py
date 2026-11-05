@@ -194,3 +194,45 @@ def test_crust_rejects_a_nonsense_identify_response():
     client.post = lambda path, body: {"unexpected": True}
     with pytest.raises(CrustError):
         client.identify(name="Acme")
+
+
+def test_one_breach_reported_with_two_dates_is_one_incident():
+    a = Finding("incident", "A", "E1", quote="q1", attrs={"date": "2022-12", "role": "breached_vendor", "remediated": True})
+    b = Finding("incident", "B", "E2", quote="q2", attrs={"date": "2023-01", "role": "breached_vendor", "remediated": False})
+    c = Finding("incident", "C", "E3", quote="q3", attrs={"date": "2019-05", "role": "supplier"})
+    merged = extract.merge_incidents([a, b, c])
+    assert [m["date"] for m in merged] == ["2022-12", "2019-05"] and merged[0]["remediated"]
+
+
+class ListCrust(NonsenseCrust):
+    def __init__(self, rows):
+        self.rows = rows
+
+    def identify(self, name=None, domain=None):
+        return [{"confidence_score": 1, "company_data": {"crustdata_company_id": i, "basic_info": {"name": n, "primary_domain": d, "employee_count_range": e}}}
+                for i, (n, d, e) in enumerate(self.rows)]
+
+
+def resolve(rows, name):
+    from duediligent.agent import resolve_identity
+    return resolve_identity(ListCrust(rows), EvidenceStore(), {"vendor_name": name}, lambda *a: None)
+
+
+def test_junk_record_with_unrelated_domain_does_not_block_a_vendor():
+    r = resolve([("HubSpot", "hubspot.com", "5001-10000"), ("HUBSPOT", "fitnessforwomen.xyz", "5001-10000")], "HubSpot")
+    assert r["status"] == "resolved" and r["domain"] == "hubspot.com"
+
+
+def test_two_real_companies_with_one_name_stay_ambiguous():
+    r = resolve([("Mercury", "mercury.com", "1001-5000"), ("Mercury", "mercuryeng.com", "1001-5000")], "Mercury")
+    assert r["status"] == "unresolved"
+
+
+def test_plan_word_after_a_company_name_still_resolves():
+    r = resolve([("GitLab", "gitlab.com", "1001-5000"), ("GitLab Foundation", "gitlabfoundation.org", "11-50")], "GitLab SaaS")
+    assert r["status"] == "resolved" and r["domain"] == "gitlab.com"
+
+
+def test_unknown_company_with_a_common_last_word_is_not_matched():
+    r = resolve([("Honeywell Technologies", "honeywell.com", "10001+")], "Flumzorp Technologies")
+    assert r["status"] == "unresolved"

@@ -42,6 +42,11 @@ def score(case: dict, r: dict) -> tuple[bool, str]:
         missing = set(case["certs"]) - claimed
         return not missing, f"claimed {sorted(claimed)}; missing {sorted(missing)}; {outcome}"
     kind = case["kind"]
+    if kind == "not_reject":
+        ok = identity.get("status") == "resolved" and outcome in (policy.APPROVE, policy.CONDITIONS)
+        return ok, f"read as {identity.get('name')}; {outcome}"
+    if kind == "same_vendor":
+        return identity.get("name") == case["name"], f"read as {identity.get('name')}; sensitivity {r['sensitivity']}; {outcome}"
     if kind == "typo":
         ok = identity.get("name") == case["name"] and identity.get("assumed") is True and outcome != policy.APPROVE
         return ok, f"read as {identity.get('name')}, assumed={identity.get('assumed')}; {outcome}"
@@ -54,10 +59,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--only")
     parser.add_argument("--workers", type=int, default=3)
+    parser.add_argument("--set", default="cases", help="cases or extra_cases")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
     load_env()
-    cases = json.loads((ROOT / "eval" / "cases.json").read_text(encoding="utf-8"))
+    cases = json.loads((ROOT / "eval" / f"{args.set}.json").read_text(encoding="utf-8"))
     if args.only:
         cases = [c for c in cases if c["group"] == args.only or c["id"] == args.only]
     crust, llm = Crust(), LLM()
@@ -83,11 +89,11 @@ def main() -> int:
         rows = list(pool.map(run, cases))
     passed = sum(r["pass"] for r in rows)
     print(f"\n{passed} of {len(rows)} passed")
-    for group in ("breach", "cert", "messy"):
+    for group in sorted({r["group"] for r in rows}):
         sub = [r for r in rows if r["group"] == group]
         if sub:
             print(f"  {group}: {sum(r['pass'] for r in sub)} of {len(sub)}")
-    (out_dir / "summary.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
+    (out_dir / f"summary_{args.set}.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
     return 0 if passed == len(rows) else 1
 
 

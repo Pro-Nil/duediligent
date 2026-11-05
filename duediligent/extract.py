@@ -9,7 +9,7 @@ from .llm import LLM, LLMError
 
 INTAKE_SYSTEM = """You turn a request for a vendor security review into JSON.
 Return one JSON object with these keys:
-- vendor_name: the company to review, exactly as the user wrote it, or null if there is none
+- vendor_name: the company to review, as the user spelled it, without plan or product-tier words such as "SaaS" or "Enterprise", or null if there is none
 - corrected_name: the well-known spelling if the name is an obvious typo, otherwise null
 - domain: a website domain only if the user wrote one, otherwise null
 - purpose: what the company wants to use the vendor for, or null
@@ -153,7 +153,29 @@ def merge_incidents(findings: list[Finding]) -> list[dict]:
                 groups[other]["remediated"] = groups[other]["remediated"] or groups[key]["remediated"]
                 groups.pop(key)
                 break
-    return sorted(groups.values(), key=lambda g: g.get("date") or "", reverse=True)
+    return _merge_nearby(sorted(groups.values(), key=lambda g: g.get("date") or ""))
+
+
+def _month_index(date: str | None) -> int | None:
+    match = re.match(r"^(\d{4})-(\d{2})", date or "")
+    return int(match.group(1)) * 12 + int(match.group(2)) if match else None
+
+
+def _merge_nearby(rows: list[dict]) -> list[dict]:
+    """Reports date one breach by discovery or disclosure, so join reports within two months."""
+    merged: list[dict] = []
+    for row in rows:
+        here, prior = _month_index(row.get("date")), _month_index(merged[-1].get("date")) if merged else None
+        if here is not None and prior is not None and here - prior <= 2:
+            last = merged[-1]
+            last["evidence"] += [e for e in row["evidence"] if e not in last["evidence"]]
+            last["quotes"] += row["quotes"]
+            last["remediated"] = last["remediated"] or row["remediated"]
+            if row.get("role") == "breached_vendor":
+                last["role"] = "breached_vendor"
+        else:
+            merged.append(row)
+    return list(reversed(merged))
 
 
 def merge_certs(findings: list[Finding]) -> list[dict]:

@@ -1,0 +1,20 @@
+PASS breach-twilio        APPROVE WITH CONDITIONS   56/56      224s  flagged years [2022, 2024], expected any of [2022]; APPROVE WITH CONDITIONS
+PASS breach-okta          APPROVE WITH CONDITIONS   57/57      237s  flagged years [2022, 2023, 2026], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
+PASS breach-circleci      APPROVE WITH CONDITIONS   57/57      246s  flagged years [2019, 2022, 2023], expected any of [2022, 2023]; APPROVE WITH CONDITIONS
+PASS breach-dropbox       APPROVE WITH CONDITIONS   45/45      132s  flagged years [2024], expected any of [2022, 2024]; APPROVE WITH CONDITIONS
+FAIL cert-gitlab          REFER TO HUMAN            1/1          8s  not identified: No confident match for "GitLab SaaS". Nearest records: GitLab (gitlab.com), GitLab Foundation (gitlabfoundation.org), JiHu GitLab (gitlab.cn), Oxeye (Part of GitLab) (oxeye.io). Please supply the vendor's website.
+PASS breach-powerschool   APPROVE WITH CONDITIONS   51/51      131s  flagged years [2024, 2025], expected any of [2024, 2025]; APPROVE WITH CONDITIONS
+PASS cert-datadog         APPROVE                   48/48      142s  claimed ['FEDRAMP', 'HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE
+PASS cert-zapier          APPROVE WITH CONDITIONS   35/35       94s  claimed ['SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+FAIL messy-typo           REFER TO HUMAN            1/1          7s  read as None, assumed=None; REFER TO HUMAN
+PASS cert-asana           APPROVE                   75/75      108s  claimed ['HIPAA', 'ISO27001', 'ISO27701', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE
+PASS messy-ambiguous      REFER TO HUMAN            1/1          9s  REFER TO HUMAN
+PASS messy-mismatch       REFER TO HUMAN            1/1          9s  REFER TO HUMAN
+PASS messy-fake           REFER TO HUMAN            1/1         16s  REFER TO HUMAN
+PASS messy-dead           REFER TO HUMAN            17/17       68s  REFER TO HUMAN
+PASS cert-figma           APPROVE WITH CONDITIONS   30/30      157s  claimed ['FEDRAMP', 'ISO27001', 'OTHER', 'SOC2', 'SOC2_TYPE2']; missing []; APPROVE WITH CONDITIONS
+
+13 of 15 passed
+  breach: 5 of 5
+  cert: 4 of 5
+  messy: 4 of 5

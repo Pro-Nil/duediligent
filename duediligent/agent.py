@@ -93,9 +93,18 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
     exact = [c for c in candidates if normalize(c["name"]) == normalize(query)]
     pool = exact or [c for c in candidates if _similarity(c["name"], query) >= 0.8]
     if not pool:
+        # "GitLab SaaS" names a product of GitLab: accept a record that is the request's first word.
+        words = normalize(query).split()
+        pool = [c for c in candidates if len(words) > 1 and normalize(c["name"]) == words[0]]
+    if not pool:
         names = ", ".join(f"{c['name']} ({c['domain']})" for c in candidates[:4])
         return {"status": "unresolved", "input": query, "evidence": [ev.id],
                 "detail": f"No confident match for \"{query}\". Nearest records: {names}. Please supply the vendor's website."}
+
+    # A record whose website has nothing to do with the name is noise when others match it.
+    stem = normalize(query).replace(" ", "")
+    on_domain = [c for c in pool if stem and stem in normalize(c["domain"]).replace(" ", "")]
+    pool = on_domain or pool
 
     # Same-named companies: only proceed if one clearly dominates by size.
     domains = {c["domain"] for c in pool}

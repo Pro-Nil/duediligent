@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monitoring · duediligent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<main class="page">
+  <div class="lede">
+    <div class="eyebrow">Monitoring</div>
+    <h1>Vendors you've approved, still being watched</h1>
+    <p>A review is true on the day it runs. After you approve a vendor, Crustdata keeps checking it, so a breach in the news or a big change in the company tells you to review it again.</p>
+  </div>
+
+  <div class="how">
+    <div><span class="n">01</span><b>You approve a vendor</b>When a review ends in Approve, a watch is created automatically. Only one per vendor, however many times you review it.</div>
+    <div><span class="n">02</span><b>Crustdata checks weekly</b>It compares the vendor's record with last week's: new news stories and changes in headcount.</div>
+    <div><span class="n">03</span><b>You get an email</b>When something changes, an alert goes to the address below. Nothing is sent when nothing changed.</div>
+    <div><span class="n">04</span><b>You review it again</b>Open the vendor here and click Re-review now. The new review uses fresh evidence.</div>
+  </div>
+
+  <section class="card pad" style="margin-bottom:14px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px"><b>Alerts go to</b>
+      <div id="email" class="mono" style="margin-top:2px">…</div>
+      <div class="small mut">Set by <code>WATCH_EMAIL</code> in <code>.env</code>. Each alert costs 5 Crustdata credits per vendor that changed.</div></div>
+    <form id="addform" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="adddomain" placeholder="vendor.com" aria-label="Vendor website to watch" style="padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2);color:var(--fg);font:14px var(--sans);width:180px">
+      <button class="btn ghost sm" type="submit">Watch a vendor</button>
+    </form>
+  </section>
+  <p class="small" id="msg" role="status" style="min-height:1.4em;margin:0 0 8px"></p>
+
+  <div id="list"><section class="card pad"><p class="empty">Loading live status from Crustdata…</p></section></div>
+</main>
+<script src="/web/common.js"></script>
+<script>
+topbar("monitoring");
+const TRACK = {news: "A new news story about the vendor", "headcount.total": "The vendor's headcount changes"};
+const ago = iso => iso ? fmtDate(iso) : "Not yet";
+const say = (t, warn) => { $("msg").textContent = t; $("msg").style.color = warn ? "var(--warn)" : "var(--fg-2)"; };
+
+function card(w) {
+  const active = w.status === "active";
+  const next = w.last_run_at && w.every_hours ? new Date(new Date(w.last_run_at).getTime() + w.every_hours * 3600e3).toISOString() : null;
+  const tracks = (w.track?.conditions || []).map(c => TRACK[c.field] || `${c.field} ${c.type}`);
+  const q = encodeURIComponent(w.request || `Re-review ${w.vendor}, ${w.domain}.`);
+  return `<section class="card pad" style="margin-bottom:14px">
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+      <div class="avatar">${esc((w.vendor || w.domain)[0])}</div>
+      <div style="flex:1;min-width:220px"><h3 style="font-size:18px;margin:0">${esc(w.vendor)}</h3>
+        <div class="small mut">${esc(w.domain)} · Crustdata watch #${esc(w.watch_id)}</div></div>
+      <span class="pill" style="--c:${active ? "var(--ok)" : "var(--warn)"};--cs:${active ? "var(--ok-soft)" : "var(--warn-soft)"}">${active ? "Watching" : esc(w.status || "Unknown")}</span>
+    </div>
+    ${w.error ? `<p class="small" style="color:var(--warn)">${esc(w.error)}</p>` : ""}
+    <div class="grid3" style="margin-top:14px">
+      <div class="tile"><div class="k">Watching for</div>${tracks.map(t => `<div>${esc(t)}</div>`).join("") || "–"}</div>
+      <div class="tile"><div class="k">Checks</div><div>Every ${w.every_hours ? Math.round(w.every_hours / 24) : "?"} days</div>
+        <div class="small mut">Last: ${esc(ago(w.last_run_at))}</div><div class="small mut">Next: ${esc(ago(next))}</div></div>
+      <div class="tile"><div class="k">So far</div><div>${w.notifications_count ?? 0} alert${w.notifications_count === 1 ? "" : "s"} sent</div>
+        <div class="small mut">${w.runs_total ?? 0} check${w.runs_total === 1 ? "" : "s"} run · ${w.credits_consumed ?? 0} credits used</div></div>
+    </div>
+    ${(w.runs || []).length ? `<details><summary>Check history</summary><ol class="timeline">${w.runs.map(r => `<li><span class="tdot" style="--c:${r.status === "SUCCESS" ? "var(--ok)" : "var(--warn)"}"></span>
+      <div><b>${r.status === "SUCCESS" ? "Checked" : esc(r.status)}</b> · ${esc(fmtDate(r.started_at))}
+      <div class="small mut">${r.new_records_count ? `${r.new_records_count} record${r.new_records_count > 1 ? "s" : ""} delivered` : "No change"} · ${r.credits_deducted || 0} credits${r.failure_reason ? " · " + esc(r.failure_reason) : ""}</div>
+      ${r === w.runs[w.runs.length - 1] ? `<div class="small mut">First check: it records the starting point the next checks compare against.</div>` : ""}</div></li>`).join("")}</ol></details>` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      <a class="btn sm" href="/new?q=${q}">Re-review now</a>
+      ${w.case_id ? `<a class="btn ghost sm" href="/report/${esc(w.case_id)}">Last review</a>` : ""}
+      <button class="btn ghost sm" data-test="${esc(w.domain)}" title="Crustdata sends one sample alert to the address above">Send a test alert</button>
+      <button class="btn ghost sm push" data-stop="${esc(w.domain)}" style="color:var(--bad)">Stop watching</button>
+    </div>
+  </section>`;
+}
+
+async function load() {
+  const r = await fetch("/api/watches").then(x => x.json()).catch(() => null);
+  if (!r) { $("list").innerHTML = `<section class="card pad"><p class="empty">Could not load watches.</p></section>`; return; }
+  $("email").textContent = r.email || "Not set. Add WATCH_EMAIL to .env and restart.";
+  $("list").innerHTML = r.watches.length ? r.watches.map(card).join("")
+    : `<section class="card pad"><p class="empty">No vendor is being watched yet. Approve a vendor in a review, or add one above.</p></section>`;
+}
+
+$("list").addEventListener("click", async e => {
+  const t = e.target.closest("[data-test]"), s = e.target.closest("[data-stop]");
+  if (t) {
+    if (!confirm(`Send one sample alert email for ${t.dataset.test}?`)) return;
+    t.disabled = true; say("Asking Crustdata to send a sample alert…");
+    const res = await fetch(`/api/watch/${encodeURIComponent(t.dataset.test)}/test`, {method: "POST"});
+    const body = await res.json().catch(() => ({}));
+    say(res.ok ? `Sample alert sent to ${body.sent_to}. Check that inbox.` : `Could not send: ${body.detail || res.status}`, !res.ok);
+    t.disabled = false;
+  }
+  if (s) {
+    if (!confirm(`Stop watching ${s.dataset.stop}? Crustdata cancels the watch, and it cannot be resumed. You can start a new one later.`)) return;
+    s.disabled = true;
+    const res = await fetch(`/api/watch/${encodeURIComponent(s.dataset.stop)}`, {method: "DELETE"});
+    say(res.ok ? `Stopped watching ${s.dataset.stop}.` : "Could not stop the watch.", !res.ok);
+    load();
+  }
+});
+
+$("addform").onsubmit = async e => {
+  e.preventDefault();
+  const d = $("adddomain").value.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase();
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d)) { say("Enter a website such as vendor.com.", true); return; }
+  say(`Creating a watch for ${d}…`);
+  const res = await fetch("/api/watch", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({domain: d})});
+  const body = await res.json().catch(() => ({}));
+  say(res.ok ? (body.status === "existing" ? `${d} was already being watched.` : `Now watching ${d}.`) : `Could not create the watch: ${body.detail || res.status}`, !res.ok);
+  $("adddomain").value = ""; load();
+};
+load();
+</script>
+</body>
+</html>

@@ -54,6 +54,8 @@
 <script>
 topbar("review");
 $("legend").innerHTML = legendHTML();
+const pre = new URLSearchParams(location.search).get("q");
+if (pre) { $("q").value = pre; $("q").focus(); }
 document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { $("q").value = b.dataset.q; $("q").focus(); });
 $("q").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("go").click(); });
 

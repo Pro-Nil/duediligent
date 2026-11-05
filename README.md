@@ -20,7 +20,9 @@ From a single request, with no one stepping in, it:
 6. **Finishes the work**: a report with citations, and a decision.
 7. **Chases what's missing.** When the decision has conditions, it gives you a link for the vendor. The vendor uploads an audit report: a SOC 2 Type II report, a SOC 3 report or an ISO 27001 certificate. The agent reads the PDF and checks four things, each quoted and cited to its page: the organisation, the audit period, the auditor and the opinion. It then decides again. A report that is out of date, qualified, for another company, or missing any of those four is not accepted.
 8. **Keeps watching.** When a vendor is approved, it creates a Crustdata watch on the vendor's domain, once per vendor, so new news or a headcount change triggers a fresh review.
-9. **Reviews a whole supplier list.** Upload a CSV and get a register ranked by risk, with a report and vendor link for each row.
+9. **Tells you when the vendor responds.** A Reviews inbox shows every case and what it's waiting on, the top bar counts unread vendor responses, and an open report shows a banner and an optional desktop alert when the vendor uploads.
+10. **Shows everything at a glance.** The Overview page totals every review: decisions, verified citations, sources, incidents, common issues, what needs you, and what's being watched. The Monitoring page lists every Crustdata watch with its live status and check history, and lets you re-review, send a test alert, stop watching or add a vendor.
+11. **Reviews a whole supplier list.** Upload a CSV and get a register ranked by risk, with a report and vendor link for each row.
 
 ### Where it still needs a person
 

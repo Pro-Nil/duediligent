@@ -35,8 +35,15 @@ const badge = o => `<span class="badge" style="--c:${deco(o).c};--cs:${deco(o).c
 const ruleName = r => RULES[(r || "").split(" ")[0]] || r;
 const fmtDate = iso => { try { return new Date(iso).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"}); } catch (e) { return iso; } };
 
-function topbar(active) {
-  const links = [["/", "New review", "review"], ["/reviews", "Reviews", "reviews"], ["/batch", "Supplier register", "batch"]];
+function topbar(active, opts = {}) {
+  if (opts.vendor) {
+    // Vendors see only this page: no navigation into the reviewer's workspace.
+    document.body.insertAdjacentHTML("afterbegin", `<div class="topbar"><div class="in"><span class="brand"><span class="mark">dd</span>duediligent</span>
+      <span class="tag">Secure document request</span></div></div>`);
+    return;
+  }
+  const links = [["/", "Overview", "overview"], ["/new", "New review", "review"], ["/reviews", "Reviews", "reviews"],
+                 ["/batch", "Supplier register", "batch"], ["/monitoring", "Monitoring", "monitoring"]];
   document.body.insertAdjacentHTML("afterbegin", `<div class="topbar"><div class="in">
     <a class="brand" href="/"><span class="mark">dd</span>duediligent</a>
     <nav class="nav">${links.map(([h, t, k]) => `<a href="${h}" class="${k === active ? "on" : ""}">${t}${k === "reviews" ? `<span class="navbadge hide" id="unread" title="Reviews with a vendor response you have not opened"></span>` : ""}</a>`).join("")}</nav>

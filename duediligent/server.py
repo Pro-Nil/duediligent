@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,7 @@ from .agent import RUNS, apply_document, case_dir, review
 from .agent import _history as agent_history
 from .config import load_env
 from .crust import Crust
+from .watch import ensure_watch
 from .llm import LLM
 from .report import markdown_body, to_markdown
 
@@ -79,8 +81,8 @@ def _sse(item) -> str:
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(WEB / "index.html")
+def overview_page() -> FileResponse:
+    return FileResponse(WEB / "overview.html")
 
 
 @app.get("/vendor/{case_id}")
@@ -178,6 +180,181 @@ def mark_seen(case_id: str) -> dict:
 @app.get("/reviews")
 def reviews_page() -> FileResponse:
     return FileResponse(WEB / "reviews.html")
+
+
+@app.get("/new")
+def new_review_page() -> FileResponse:
+    return FileResponse(WEB / "index.html")
+
+
+@app.get("/monitoring")
+def monitoring_page() -> FileResponse:
+    return FileResponse(WEB / "monitoring.html")
+
+
+RULE_NAMES = {"R1": "Identity unclear", "R2": "Company viability", "R3": "Missing evidence", "R4": "Security incident",
+              "R5": "Certification", "R6": "Company stability", "R8": "Business red flag"}
+
+
+@app.get("/api/stats")
+def stats() -> dict:
+    """Totals across every saved review, for the overview page."""
+    results = []
+    if RUNS.exists():
+        for folder in RUNS.iterdir():
+            if not folder.is_dir():
+                continue
+            try:
+                r = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            r["case_id"] = folder.name
+            r["history"] = agent_history(r)
+            results.append(r)
+    outcomes = {k: 0 for k in SEVERITY}
+    statuses = {"Vendor responded": 0, "Waiting on vendor": 0, "Needs a person": 0, "Done": 0}
+    issues: dict[str, int] = {}
+    cited = total_claims = sources = elapsed_n = 0
+    elapsed = 0.0
+    uploads = accepted = 0
+    latest_by_vendor: dict[str, dict] = {}
+    events = []
+    for r in results:
+        d = r["decision"]
+        outcomes[d["outcome"]] = outcomes.get(d["outcome"], 0) + 1
+        statuses[_status(r)] = statuses.get(_status(r), 0) + 1
+        for item in d["referrals"] + d["conditions"] + [x for x in d["reasons"] if not x["rule"].startswith("R7")]:
+            code = item["rule"].split(" ")[0]
+            issues[code] = issues.get(code, 0) + 1
+        cited += r["audit"]["verified"]
+        total_claims += r["audit"]["total"]
+        sources += len(r.get("evidence") or [])
+        if r.get("elapsed_seconds"):
+            elapsed += r["elapsed_seconds"]
+            elapsed_n += 1
+        name = r["identity"].get("name") or r["intake"].get("vendor_name") or "Unidentified"
+        when = r["history"][-1].get("at") or r.get("reviewed_at") or ""
+        if r["identity"].get("status") == "resolved" and (name not in latest_by_vendor or when > latest_by_vendor[name]["when"]):
+            latest_by_vendor[name] = {"when": when, "r": r}
+        for h in r["history"]:
+            if h.get("kind") == "vendor_upload":
+                uploads += 1
+                accepted += bool(h.get("accepted"))
+            events.append({"at": h.get("at"), "kind": h.get("kind"), "vendor": name, "case_id": r["case_id"],
+                           "outcome": h.get("outcome"), "file": h.get("file"), "from": h.get("from")})
+    vendors = [v["r"] for v in latest_by_vendor.values()]
+    incident_rank = sorted(
+        ({"vendor": v["identity"]["name"], "domain": v["identity"].get("domain"), "case_id": v["case_id"],
+          "incidents": len(v.get("incidents") or []), "outcome": v["decision"]["outcome"]} for v in vendors),
+        key=lambda x: -x["incidents"])
+    certified = sum(1 for v in vendors if any(c.get("status") == "current_claim" and c.get("framework") != "OTHER" for c in v.get("certifications") or []))
+    with_incidents = sum(1 for v in vendors if v.get("incidents"))
+    attention = [_case_row(RUNS / r["case_id"]) for r in results if _status(r) in ("Vendor responded", "Needs a person")]
+    attention = sorted([a for a in attention if a], key=lambda a: (not a["unread"], a["status"] != "Vendor responded", a["updated_at"] or ""), reverse=False)
+    events.sort(key=lambda e: e["at"] or "", reverse=True)
+    try:
+        watched = len(json.loads((RUNS / "watches.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        watched = 0
+    return {
+        "reviews": len(results),
+        "vendors": len(vendors),
+        "outcomes": outcomes,
+        "statuses": statuses,
+        "issues": sorted(({"code": k, "label": RULE_NAMES.get(k, k), "count": v} for k, v in issues.items()), key=lambda x: -x["count"]),
+        "citations": {"verified": cited, "total": total_claims},
+        "sources": sources,
+        "avg_seconds": round(elapsed / elapsed_n) if elapsed_n else None,
+        "uploads": uploads,
+        "uploads_accepted": accepted,
+        "vendors_with_incidents": with_incidents,
+        "incidents_total": sum(x["incidents"] for x in incident_rank),
+        "vendors_certified": certified,
+        "top_incidents": [x for x in incident_rank if x["incidents"]][:6],
+        "attention": attention[:6],
+        "recent": events[:10],
+        "watched": watched,
+        "first_review": min((r.get("created_at") or r.get("reviewed_at") or "" for r in results), default=None),
+    }
+
+
+@app.get("/api/watches")
+def watches() -> dict:
+    """Every vendor under watch, with Crustdata's live status for each."""
+    try:
+        registry = json.loads((RUNS / "watches.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        registry = {}
+    names = {}
+    if RUNS.exists():
+        for folder in RUNS.iterdir():
+            try:
+                r = json.loads((folder / "report.json").read_text(encoding="utf-8")) if folder.is_dir() else None
+            except (OSError, ValueError):
+                continue
+            if r and r["identity"].get("domain") in registry:
+                names[r["identity"]["domain"]] = (r["identity"].get("name"), folder.name, r.get("request"))
+    crust = Crust()
+    out = []
+    for domain, w in registry.items():
+        row = {"domain": domain, **w, "vendor": names.get(domain, (domain,))[0], "case_id": (names.get(domain) or (None, None))[1],
+               "request": (names.get(domain) or (None, None, None))[2]}
+        try:
+            live = crust.client.get(f"/watch/company/{w['watch_id']}").json()
+            runs = crust.client.get(f"/watch/company/{w['watch_id']}/runs").json()
+            row.update({
+                "status": live.get("status"), "created_at": live.get("created_at"), "last_run_at": live.get("last_run_at"),
+                "every_hours": ((live.get("config") or {}).get("trigger") or {}).get("every_hours"),
+                "notifications_count": live.get("notifications_count"), "credits_consumed": live.get("credits_consumed"),
+                "track": live.get("track"),
+                "runs": [{k: x.get(k) for k in ("started_at", "status", "new_records_count", "credits_deducted", "failure_reason")}
+                         for x in (runs.get("runs") or [])[:5]],
+                "runs_total": runs.get("total_count"),
+            })
+        except Exception as exc:  # noqa: BLE001 - one unreachable watch must not hide the others
+            row.update({"status": "unknown", "error": f"Could not reach Crustdata: {type(exc).__name__}"})
+        out.append(row)
+    return {"watches": out, "email": os.environ.get("WATCH_EMAIL", "")}
+
+
+@app.post("/api/watch")
+def watch_add(body: dict) -> dict:
+    """Watch a vendor by website, without a review. One watch per domain."""
+    import re as _re
+    domain = str(body.get("domain") or "").strip().lower()
+    if not _re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", domain):
+        raise HTTPException(400, "Enter a website such as vendor.com")
+    result = ensure_watch(Crust(), domain)
+    if result["status"] in ("failed", "skipped"):
+        raise HTTPException(502, result.get("reason") or "Could not create the watch")
+    return result
+
+
+@app.post("/api/watch/{domain}/test")
+def watch_test(domain: str) -> dict:
+    """Ask Crustdata to send one sample alert, so the reviewer sees what an alert looks like."""
+    registry = json.loads((RUNS / "watches.json").read_text(encoding="utf-8"))
+    if domain not in registry:
+        raise HTTPException(404, "Not watched")
+    resp = Crust().client.post(f"/watch/company/{registry[domain]['watch_id']}/test", json={})
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"Crustdata said: {resp.text[:200]}")
+    return {"ok": True, "sent_to": registry[domain].get("email")}
+
+
+@app.delete("/api/watch/{domain}")
+def watch_cancel(domain: str) -> dict:
+    """Stop watching a vendor. Crustdata cancels the watch; it cannot be resumed."""
+    path = RUNS / "watches.json"
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    if domain not in registry:
+        raise HTTPException(404, "Not watched")
+    resp = Crust().client.delete(f"/watch/company/{registry[domain]['watch_id']}")
+    if resp.status_code not in (200, 204):
+        raise HTTPException(502, f"Crustdata said: {resp.text[:200]}")
+    registry.pop(domain)
+    path.write_text(json.dumps(registry, indent=1), encoding="utf-8")
+    return {"ok": True}
 
 
 @app.get("/api/case/{case_id}")

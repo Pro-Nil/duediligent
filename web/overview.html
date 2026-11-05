@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Overview · duediligent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<main class="page">
+  <div class="lede" style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+    <div>
+      <div class="eyebrow">Overview</div>
+      <h1>Your vendor risk at a glance</h1>
+      <p style="margin-bottom:0" id="since">Everything duediligent has reviewed, checked and is watching.</p>
+    </div>
+    <div class="push" style="display:flex;gap:8px">
+      <a class="btn ghost" href="/batch">Review a list</a>
+      <a class="btn" href="/new">New review</a>
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="ov-grid">
+    <section class="card pad">
+      <div class="card-head"><h3>Decisions</h3><span class="mut small" id="dec-total"></span></div>
+      <p class="mut small" style="margin:0 0 12px">How every review ended. Hover a segment for its count.</p>
+      <div class="segbar" id="segbar" role="img"></div>
+      <div class="seglegend" id="seglegend"></div>
+    </section>
+
+    <section class="card pad">
+      <div class="card-head"><h3>What needs you</h3><a class="small" href="/reviews">All reviews</a></div>
+      <div id="attention"></div>
+    </section>
+
+    <section class="card pad">
+      <div class="card-head"><h3>Most common issues</h3></div>
+      <p class="mut small" style="margin:0 0 12px">Every condition, referral and blocking reason, by type.</p>
+      <div class="hbars" id="issues"></div>
+    </section>
+
+    <section class="card pad">
+      <div class="card-head"><h3>Vendors with the most incidents</h3></div>
+      <p class="mut small" style="margin:0 0 8px">Public breaches and security incidents found, latest review per vendor.</p>
+      <div id="incidents"></div>
+    </section>
+
+    <section class="card pad">
+      <div class="card-head"><h3>Monitoring</h3><a class="small" href="/monitoring">Manage</a></div>
+      <div id="monitor"></div>
+    </section>
+
+    <section class="card pad">
+      <div class="card-head"><h3>Recent activity</h3></div>
+      <ol class="timeline" id="recent"></ol>
+    </section>
+  </div>
+</main>
+<div class="tip" id="tip" role="tooltip"></div>
+<script src="/web/common.js"></script>
+<script>
+topbar("overview");
+const ORDER = ["APPROVE", "APPROVE WITH CONDITIONS", "REFER TO HUMAN", "REJECT"];
+const pct = (a, b) => b ? Math.round(100 * a / b) : 0;
+const ago = iso => {
+  if (!iso) return "";
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return fmtDate(iso);
+};
+
+// Hover layer: one tooltip, positioned at the pointer, for any element with data-tip.
+document.addEventListener("pointermove", e => {
+  const t = e.target.closest("[data-tip]"), tip = $("tip");
+  if (!t) { tip.classList.remove("on"); return; }
+  tip.innerHTML = t.dataset.tip; tip.classList.add("on");
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.max(e.clientY - tip.offsetHeight - 12, 8);
+  tip.style.transform = `translate(${x}px, ${y}px)`;
+});
+
+async function load() {
+  const s = await fetch("/api/stats").then(r => r.json());
+  $("since").textContent = s.first_review ? `Everything reviewed since ${fmtDate(s.first_review)}, every fact checked, and every vendor being watched.` : "No reviews yet. Start with a new review.";
+
+  const verified = pct(s.citations.verified, s.citations.total);
+  const tiles = [
+    ["Reviews run", s.reviews.toLocaleString(), `${s.vendors} distinct vendors`, "Every review, including repeats of the same vendor."],
+    ["Citations verified", `${verified}%`, `${s.citations.verified.toLocaleString()} of ${s.citations.total.toLocaleString()} claims`, "Each claim was re-checked word for word against its saved source."],
+    ["Sources saved", s.sources.toLocaleString(), "pages, searches and records", "Every page, search and company record a review used, saved with a hash."],
+    ["Incidents found", s.incidents_total, `at ${s.vendors_with_incidents} of ${s.vendors} vendors`, "Public breaches and security incidents, latest review per vendor."],
+    ["Vendor documents", s.uploads, `${s.uploads_accepted} accepted`, "Audit reports uploaded by vendors through their link."],
+    ["Average review", s.avg_seconds != null ? `${s.avg_seconds}s` : "–", "from request to decision", "Includes reviews that reused saved results, so new vendors take longer."],
+  ];
+  $("kpis").innerHTML = tiles.map(([k, v, sub, help]) => `<div class="kpi card" data-tip="${esc(help)}"><span class="k">${k}</span><b>${esc(v)}</b><span class="sub">${esc(sub)}</span></div>`).join("");
+
+  const total = ORDER.reduce((a, o) => a + (s.outcomes[o] || 0), 0);
+  $("dec-total").textContent = `${total} reviews`;
+  $("segbar").setAttribute("aria-label", ORDER.map(o => `${deco(o).label}: ${s.outcomes[o] || 0}`).join(", "));
+  $("segbar").innerHTML = ORDER.filter(o => s.outcomes[o]).map(o =>
+    `<span style="flex:${s.outcomes[o]};background:${deco(o).c}" data-tip="<b>${esc(deco(o).label)}</b><br>${s.outcomes[o]} reviews · ${pct(s.outcomes[o], total)}%"></span>`).join("");
+  $("seglegend").innerHTML = ORDER.map(o => `<div class="li" data-tip="${esc(deco(o).help)}"><i style="background:${deco(o).c}"></i><span>${esc(deco(o).label)}</span><b>${s.outcomes[o] || 0}</b><span class="mut">${pct(s.outcomes[o] || 0, total)}%</span></div>`).join("");
+
+  const maxIssue = Math.max(1, ...s.issues.map(i => i.count));
+  $("issues").innerHTML = s.issues.length ? s.issues.map(i => `<div class="hbar" data-tip="<b>${esc(i.label)}</b><br>${i.count} times across all reviews">
+      <span class="lab">${esc(i.label)}</span><span class="track"><span class="fill" style="width:${(100 * i.count / maxIssue).toFixed(1)}%"></span></span><span class="val">${i.count}</span></div>`).join("")
+    : `<p class="empty">No issues yet.</p>`;
+
+  $("attention").innerHTML = s.attention.length ? s.attention.map(a => `<a class="att" href="/report/${esc(a.case_id)}">
+      ${a.unread ? `<span class="unread-dot"></span>` : ""}<div style="flex:1;min-width:0"><b>${esc(a.vendor)}</b>
+      <div class="small mut">${a.status === "Vendor responded" ? `Vendor uploaded ${esc(a.last_event?.file || "a document")}` : "The agent stopped rather than guess"} · ${esc(ago(a.updated_at))}</div></div>
+      <span class="status" style="--c:${a.status === "Vendor responded" ? "var(--accent)" : "var(--ref)"}"><i></i>${esc(a.status)}</span></a>`).join("")
+    : `<p class="empty">Nothing is waiting on you.</p>`;
+
+  $("incidents").innerHTML = s.top_incidents.length ? `<table class="mini"><tbody>${s.top_incidents.map(x => `<tr>
+      <td><a href="/report/${esc(x.case_id)}"><b>${esc(x.vendor)}</b></a><div class="small mut">${esc(x.domain || "")}</div></td>
+      <td class="num">${x.incidents}</td><td>${badge(x.outcome)}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="empty">No incidents found yet.</p>`;
+
+  const w = await fetch("/api/watches").then(r => r.json()).catch(() => ({watches: []}));
+  $("monitor").innerHTML = w.watches.length
+    ? `<p style="margin:0 0 10px"><b style="font-size:24px">${w.watches.length}</b> <span class="mut">vendor${w.watches.length > 1 ? "s" : ""} watched by Crustdata. A new news story or a headcount change sends an alert${w.email ? ` to ${esc(w.email)}` : ""}.</span></p>` +
+      w.watches.map(x => `<div class="att"><span class="status" style="--c:${x.status === "active" ? "var(--ok)" : "var(--warn)"}"><i></i></span>
+        <div style="flex:1"><b>${esc(x.vendor)}</b><div class="small mut">Watch #${esc(x.watch_id)} · ${esc(x.status)} · last checked ${esc(ago(x.last_run_at))}</div></div></div>`).join("")
+    : `<p class="empty">No vendor is watched yet. Approved vendors are added automatically.</p>`;
+
+  $("recent").innerHTML = s.recent.length ? s.recent.slice(0, 8).map(e => `<li><span class="tdot" style="--c:${deco(e.outcome).c}"></span><div>
+      <a href="/report/${esc(e.case_id)}"><b>${esc(e.vendor)}</b></a> · ${e.kind === "vendor_upload" ? `vendor uploaded ${esc(e.file)}` : "reviewed"}
+      <div class="small">${badge(e.outcome)} <span class="mut">${esc(ago(e.at))}</span></div></div></li>`).join("")
+    : `<p class="empty">No activity yet.</p>`;
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

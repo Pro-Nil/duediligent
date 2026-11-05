@@ -10,6 +10,7 @@ REJECT = "REJECT"
 REFER = "REFER TO HUMAN"
 
 STRONG_CERTS = {"SOC2_TYPE2", "SOC2", "ISO27001"}
+CERT_LABELS = {"SOC2_TYPE2": "SOC 2 Type II", "SOC2": "SOC 2", "ISO27001": "ISO 27001"}
 
 
 @dataclass
@@ -112,7 +113,7 @@ def evaluate(ctx: dict, today: date | None = None) -> Decision:
     certs = ctx.get("certifications") or []
     current = [c for c in certs if c.get("status") == "current_claim" and c.get("framework") in STRONG_CERTS]
     if current:
-        names = ", ".join(sorted({c["framework"] for c in current}))
+        names = ", ".join(CERT_LABELS.get(n, n) for n in sorted({c["framework"] for c in current}))
         ev = sorted({e for c in current for e in c.get("evidence", [])})
         d.notes.append(Reason("R5 certification", f"The vendor publicly claims: {names}. This review saw the claim, not the audit report.", ev))
         if sensitivity == "high":
@@ -136,6 +137,9 @@ def evaluate(ctx: dict, today: date | None = None) -> Decision:
     # R8: anything that looks off about the business itself.
     for flag in stab.get("flags") or []:
         d.conditions.append(Reason("R8 red flag", flag["text"], flag.get("evidence") or []))
+
+    for note in stab.get("notes") or []:
+        d.notes.append(Reason("R8 data quality", note["text"], note.get("evidence") or []))
 
     if rejected:
         d.outcome = REJECT

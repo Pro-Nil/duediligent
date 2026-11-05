@@ -1,0 +1,17 @@
+[
+  {"id": "breach-okta", "group": "breach", "request": "We want to use Okta for single sign-on across the company. Can we go ahead?", "name": "Okta", "breach_years": [2022, 2023]},
+  {"id": "breach-twilio", "group": "breach", "request": "Review Twilio. We would send customer phone numbers through it.", "name": "Twilio", "breach_years": [2022]},
+  {"id": "breach-circleci", "group": "breach", "request": "Is CircleCI safe for our CI pipelines? It would hold production secrets.", "name": "CircleCI", "breach_years": [2022, 2023]},
+  {"id": "breach-dropbox", "group": "breach", "request": "Legal wants to use Dropbox Sign, by Dropbox, for contracts. Check the vendor please.", "name": "Dropbox", "breach_years": [2022, 2024]},
+  {"id": "breach-powerschool", "group": "breach", "request": "Our school trust is considering PowerSchool for student records.", "name": "PowerSchool", "breach_years": [2024, 2025]},
+  {"id": "cert-datadog", "group": "cert", "request": "Review Datadog for infrastructure monitoring.", "name": "Datadog", "certs": ["SOC2"]},
+  {"id": "cert-gitlab", "group": "cert", "request": "We may host our source code on GitLab SaaS. Vet them.", "name": "GitLab", "certs": ["SOC2", "ISO27001"]},
+  {"id": "cert-asana", "group": "cert", "request": "Marketing wants Asana for project tracking. Is that fine?", "name": "Asana", "certs": ["SOC2", "ISO27001"]},
+  {"id": "cert-zapier", "group": "cert", "request": "Ops wants Zapier automations touching our CRM. Check it.", "name": "Zapier", "certs": ["SOC2"]},
+  {"id": "cert-figma", "group": "cert", "request": "Please review Figma, figma.com, for our design team.", "name": "Figma", "certs": ["SOC2"]},
+  {"id": "messy-typo", "group": "messy", "kind": "typo", "request": "hubspott for our crm? it would have customer emails", "name": "HubSpot"},
+  {"id": "messy-ambiguous", "group": "messy", "kind": "refer", "request": "Can we buy from Apex?"},
+  {"id": "messy-dead", "group": "messy", "kind": "refer_or_reject", "request": "A consultant recommended Theranos, theranos.com, for lab services. Check them."},
+  {"id": "messy-mismatch", "group": "messy", "kind": "refer", "request": "New payment vendor: Stripe. Their website is paypal.com. Is it OK?"},
+  {"id": "messy-fake", "group": "messy", "kind": "refer", "request": "Review Flumzorp Quantaledger Technologies for our payroll data."}
+]

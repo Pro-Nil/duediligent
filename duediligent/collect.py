@@ -135,18 +135,32 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
             fact(f"people.{group}.{hit}.basic_profile.name", f"Security leader on record ({dig(people[hit], 'basic_profile.current_title')})", "leader")
             break
 
-    # Who runs it: names as held on the company record.
-    seen_people: set[str] = set()
+    # Who runs it. Profiles are self-reported, so strangers can claim "Founder". Rank chief
+    # executives first, then by audience, and label the result as listed rather than proven.
+    listed: list[tuple[float, str, int]] = []
     for group in ("founders", "cxos"):
         people = dig(company, f"people.{group}") or []
         if not isinstance(people, list):
             continue
-        for i, person in enumerate(people[:30]):
-            who = dig(person, "basic_profile.name")
-            if who and who not in seen_people and len(seen_people) < 6:
-                seen_people.add(who)
-                title = dig(person, "basic_profile.current_title") or ("Founder" if group == "founders" else "Executive")
-                fact(f"people.{group}.{i}.basic_profile.name", str(title)[:90], "leader")
+        for i, person in enumerate(people[:60]):
+            title = str(dig(person, "basic_profile.current_title") or "")
+            if not dig(person, "basic_profile.name"):
+                continue
+            reach = 0.0
+            for key in ("professional_network.followers", "professional_network.num_followers", "professional_network.connections"):
+                value = dig(person, key)
+                if isinstance(value, (int, float)):
+                    reach = max(reach, float(value))
+            score = reach + (1e9 if re.search(r"ceo|chief executive", title, re.I) else 0)
+            listed.append((score, group, i))
+    seen_people: set[str] = set()
+    for _, group, i in sorted(listed, key=lambda row: row[0], reverse=True):
+        who = dig(company, f"people.{group}.{i}.basic_profile.name")
+        if who in seen_people or len(seen_people) >= 3:
+            continue
+        seen_people.add(who)
+        title = dig(company, f"people.{group}.{i}.basic_profile.current_title") or group
+        fact(f"people.{group}.{i}.basic_profile.name", f"Listed as {str(title)[:80]}", "leader")
 
     closed = isinstance(status, str) and bool(re.search(r"closed|defunct|inactive|out of business|dissolved", status, re.I))
     flags = []
@@ -159,8 +173,15 @@ def stability_facts(store: EvidenceStore, company: dict, ev_id: str) -> tuple[di
         flags.append({"text": f"Only {int(headcount)} staff on record. Confirm this is a trading business with real operations.", "evidence": [ev_id]})
     if not seen_people:
         flags.append({"text": "The company record names no founder or executive. Ask who runs the business.", "evidence": [ev_id]})
+    notes = []
+    size_band = re.findall(r"\d[\d,]*", str(dig(company, "basic_info.employee_count_range") or ""))
+    if isinstance(headcount, (int, float)) and len(size_band) == 2:
+        low, high = (int(n.replace(",", "")) for n in size_band)
+        if headcount > high * 2 or headcount < low / 2:
+            notes.append({"text": f"The record disagrees with itself: {int(headcount):,} staff, but a size band of {low:,} to {high:,}. Treat its headcount as unreliable.", "evidence": [ev_id]})
     return {
         "flags": flags,
+        "notes": notes,
         "closed": closed,
         "closed_detail": f"The company record shows status \"{status}\"." if closed else None,
         "acquired": acquisition or None,

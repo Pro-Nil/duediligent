@@ -9,6 +9,10 @@ CERT_NAMES = {"SOC2_TYPE2": "SOC 2 Type II", "SOC2": "SOC 2", "ISO27001": "ISO 2
 STATUS = {"current_claim": "Claimed as current", "in_progress": "In progress", "mention_only": "Mentioned only"}
 
 
+CONTROL_NAMES = {"bug_bounty": "Bug bounty programme", "disclosure_policy": "Vulnerability disclosure policy", "encryption": "Encryption statement",
+                 "dpa": "Data processing agreement", "subprocessors": "Published subprocessor list", "pen_test": "Penetration testing"}
+
+
 def cite(ids: list[str] | None) -> str:
     return " ".join(f"[{e}]" for e in ids or [])
 
@@ -83,19 +87,31 @@ def to_markdown(r: dict) -> str:
     out.append("")
 
     out.extend(["## Certifications", ""])
-    if r["certifications"]:
-        for c in r["certifications"]:
+    named = [c for c in r["certifications"] if c["framework"] != "OTHER"]
+    if named:
+        for c in named:
             out.append(f"- **{CERT_NAMES.get(c['framework'], c['framework'])}**: {STATUS.get(c['status'], c['status'])} {cite(c['evidence'])}")
             out.extend(f"  - \"{q['quote']}\" [{q['evidence']}]" for q in c.get("quotes", [])[:1])
     else:
         out.append(f"No certification statement found publicly. {cite(r['coverage'].get('search_evidence'))}")
     out.append("")
 
-    for kind, title in (("leader", "Who runs it"), ("control", "Published controls"), ("posture", "Passive checks"), ("stability", "Company facts")):
+    for kind, title in (("leader", "Who runs it (self-reported profiles)"), ("control", "Published controls"), ("posture", "Passive checks"), ("stability", "Company facts")):
         rows = [f for f in r["findings"] if f["kind"] == kind and f["verified"]]
-        if rows:
+        if kind == "control":
+            grouped: dict[str, list[str]] = {}
+            for f in rows:
+                ids = grouped.setdefault(CONTROL_NAMES.get(f["claim"], f["claim"]), [])
+                if f["evidence_id"] not in ids:
+                    ids.append(f["evidence_id"])
+            lines = [f"{name} {cite(ids)}" for name, ids in grouped.items()]
+        elif kind == "leader":
+            lines = [f"{f['value']}: {f['claim']} [{f['evidence_id']}]" for f in rows]
+        else:
+            lines = [f"{f['claim']} [{f['evidence_id']}]" for f in rows]
+        if lines:
             out.extend([f"## {title}", ""])
-            out.extend(f"- {f['claim']} [{f['evidence_id']}]" for f in rows)
+            out.extend(f"- {line}" for line in lines)
             out.append("")
 
     if r.get("vendor_email"):

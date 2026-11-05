@@ -208,6 +208,9 @@ class ListCrust(NonsenseCrust):
     def __init__(self, rows):
         self.rows = rows
 
+    def search(self, query, sources, site=None, start_date=None):
+        return []
+
     def identify(self, name=None, domain=None):
         return [{"confidence_score": 1, "company_data": {"crustdata_company_id": i, "basic_info": {"name": n, "primary_domain": d, "employee_count_range": e}}}
                 for i, (n, d, e) in enumerate(self.rows)]
@@ -236,3 +239,32 @@ def test_plan_word_after_a_company_name_still_resolves():
 def test_unknown_company_with_a_common_last_word_is_not_matched():
     r = resolve([("Honeywell Technologies", "honeywell.com", "10001+")], "Flumzorp Technologies")
     assert r["status"] == "unresolved"
+
+
+def test_near_miss_spelling_is_not_taken_as_the_vendor():
+    r = resolve([("Cxihub", "cxihub.com", "11-50")], "C3iHub")
+    assert r["status"] == "unresolved"
+
+
+def test_record_whose_name_starts_with_the_query_beats_a_near_miss():
+    r = resolve([("C3iHub, IIT Kanpur", "c3ihub.org", "201-500"), ("Cxihub", "cxihub.com", "11-50")], "C3iHub")
+    assert r["status"] == "resolved" and r["domain"] == "c3ihub.org" and not r["assumed"]
+
+
+class DiscoverCrust(ListCrust):
+    def search(self, query, sources, site=None, start_date=None):
+        return [{"url": "https://www.cxihub.com/"}, {"url": "https://c3ihub.org/about"}]
+
+    def identify(self, name=None, domain=None):
+        if domain == "c3ihub.org":
+            self.rows = [("C3iHub, IIT Kanpur", "c3ihub.org", "201-500")]
+        return super().identify(name, domain)
+
+
+def test_official_site_found_by_search_when_no_record_has_the_name(monkeypatch):
+    from duediligent import collect
+    from duediligent.agent import resolve_identity
+    monkeypatch.setattr(collect, "canonical_domain", lambda d: d)
+    crust = DiscoverCrust([("Cxihub", "cxihub.com", "11-50")])
+    r = resolve_identity(crust, EvidenceStore(), {"vendor_name": "C3iHub"}, lambda *a: None)
+    assert r["status"] == "resolved" and r["domain"] == "c3ihub.org"

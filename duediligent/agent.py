@@ -41,12 +41,41 @@ def _same_company(a: str, b: str) -> bool:
     return bool(x and y) and (x in y or y in x or _similarity(x, y) >= 0.75)
 
 
+def _compact(text: str) -> str:
+    return normalize(text).replace(" ", "")
+
+
+def _names_match(query: str, cand: dict) -> bool:
+    q, name = normalize(query), normalize(cand.get("name") or "")
+    stem = _compact((cand.get("domain") or "").split(".")[0])
+    return bool(q) and (name == q or name.startswith(q + " ") or stem == _compact(query))
+
+
+def _discover_domain(crust: Crust, store: EvidenceStore, query: str, emit: Emit) -> str | None:
+    """When no record carries the name, look for the official site whose domain is the name."""
+    try:
+        rows = crust.search(f'"{query}" official website', ["web"])
+    except CrustError as exc:
+        if exc.terminal:
+            raise
+        return None
+    store.add("search", f"Web search: {query} official website", f"crustdata:/web/search/live?q={query} official website",
+              text="\n".join(f"{r.get('title')} | {r.get('url')}" for r in rows) or "(no results)")
+    want = _compact(query)
+    for r in rows:
+        host = collect.registered(r.get("url") or "")
+        if host and "google." not in host and _compact(host.split(".")[0]) == want:
+            emit("info", f"Found the official site {host} by web search")
+            return host
+    return None
+
+
 def _size_rank(employees: str | None) -> int:
     nums = re.findall(r"\d[\d,]*", str(employees or ""))
     return int(nums[0].replace(",", "")) if nums else 0
 
 
-def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emit) -> dict:
+def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emit, _discovered: bool = False) -> dict:
     """Pin the request to one company, or say exactly why that is not possible."""
     typed = intake.get("vendor_name")
     corrected = intake.get("corrected_name")
@@ -90,12 +119,18 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
         return {"status": "resolved", "input": domain, "name": best["name"], "domain": best["domain"],
                 "id": best["id"], "assumed": False, "evidence": [ev.id]}
 
-    exact = [c for c in candidates if normalize(c["name"]) == normalize(query)]
-    pool = exact or [c for c in candidates if _similarity(c["name"], query) >= 0.8]
+    # No spelling guesses: a near-miss name is a different company (C3iHub is not Cxihub).
+    # A record matches when its name is the query, starts with it ("C3iHub, IIT Kanpur"),
+    # or its website is the query ("c3ihub.org"). The model may correct an obvious typo first.
+    pool = [c for c in candidates if _names_match(query, c)]
     if not pool:
         # "GitLab SaaS" names a product of GitLab: accept a record that is the request's first word.
         words = normalize(query).split()
         pool = [c for c in candidates if len(words) > 1 and normalize(c["name"]) == words[0]]
+    if not pool and not _discovered:
+        found = _discover_domain(crust, store, query, emit)
+        if found:
+            return resolve_identity(crust, store, {**intake, "domain": found}, emit, _discovered=True)
     if not pool:
         names = ", ".join(f"{c['name']} ({c['domain']})" for c in candidates[:4])
         return {"status": "unresolved", "input": query, "evidence": [ev.id],
@@ -117,7 +152,7 @@ def resolve_identity(crust: Crust, store: EvidenceStore, intake: dict, emit: Emi
         pool = ranked[:1]
 
     best = pool[0]
-    typo = bool(typed and normalize(typed) != normalize(best["name"]))
+    typo = bool(typed and corrected and normalize(typed) != normalize(corrected))
     if typo:
         emit("warn", f"Read \"{typed}\" as {best['name']} ({best['domain']}). The report will ask you to confirm.")
     return {"status": "resolved", "input": typed, "name": best["name"], "domain": best["domain"],

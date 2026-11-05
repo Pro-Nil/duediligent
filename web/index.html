@@ -4,60 +4,53 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>duediligent</title>
+<link rel="stylesheet" href="/web/style.css">
 <style>
-:root{--bg:#f7f7f5;--panel:#fff;--fg:#17181c;--mut:#62656e;--line:#e0e1e4;--accent:#2b4fd8;--ok:#116b3a;--warn:#8a5a00;--bad:#a81f1f;--ref:#5a3aa8}
-@media (prefers-color-scheme:dark){:root{--bg:#101114;--panel:#17181d;--fg:#ececef;--mut:#9a9da6;--line:#2b2d34;--accent:#8ea5ff;--ok:#5fd08f;--warn:#e5b45a;--bad:#ff8a8a;--ref:#bda6ff}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,'Segoe UI',sans-serif}
-main{max-width:860px;margin:0 auto;padding:36px 16px 80px}
-header b{font-size:18px;letter-spacing:-.01em}
-header p{margin:2px 0 18px;color:var(--mut)}
 textarea{width:100%;min-height:76px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:inherit;font:inherit;resize:vertical}
-.row{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
-button{padding:9px 16px;border:0;border-radius:7px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-@media (prefers-color-scheme:dark){button{color:#101114}}
-button:disabled{opacity:.5;cursor:default}
-.chip{padding:4px 9px;border:1px solid var(--line);border-radius:6px;background:none;color:var(--mut);font-size:13px;font-weight:400}
-#log{margin-top:22px;font:13px/1.7 ui-monospace,Consolas,monospace;color:var(--mut)}
-#log div.step{color:var(--fg)}#log div.warn{color:var(--warn)}
-#verdict{display:none;margin-top:22px;padding:16px 18px;border:1px solid var(--line);border-left:5px solid var(--c,var(--line));border-radius:8px;background:var(--panel)}
-#verdict strong{display:block;font-size:21px;color:var(--c)}
-#verdict span{color:var(--mut);font-size:13px}
-#report{display:none;margin-top:14px;padding:6px 22px 22px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-#report h1{font-size:19px;margin:16px 0 8px}
-#report h2{font-size:14px;margin:24px 0 6px;padding-top:12px;border-top:1px solid var(--line)}
-#report ul{padding-left:18px;margin:6px 0}#report li{margin:4px 0;overflow-wrap:anywhere}
-#report li.quote{list-style:none;color:var(--mut);font-size:13.5px}
-.rule{color:var(--mut);font-size:12px}.cite{font:12px ui-monospace,monospace;color:var(--accent);text-decoration:none}
-pre{white-space:pre-wrap;padding:12px;border-radius:6px;background:var(--bg);font-size:13px}
-li:target{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+#next h3{margin:0 0 4px;font-size:15px}
+#next code{font-size:13px;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
 <main>
-  <header><b>duediligent</b><p>Vendor security reviews, finished. Every claim checked against its source.</p></header>
+  <header><b>duediligent</b><p>Vendor security reviews, finished. Every claim checked against its source. <a href="/batch">Review a vendor list</a></p></header>
   <textarea id="q" placeholder="We want to use Acme Corp to store customer personal data. Can we?"></textarea>
   <div class="row">
     <button id="go">Review vendor</button>
     <button class="chip" data-q="Our marketing agency wants to place video ads with Quibi. Is the vendor OK?">Closed company</button>
     <button class="chip" data-q="New payment vendor: Stripe. Their website is paypal.com. Is it OK?">Name and website disagree</button>
-    <button class="chip" data-q="Can we buy from Mercury?">Ambiguous name</button>
+    <button class="chip" data-q="Can we buy from NTRO?">Ambiguous acronym</button>
     <button class="chip" data-q="hubspott for our crm? it would have customer emails">A typo</button>
   </div>
   <div id="log" aria-live="polite"></div>
   <div id="verdict"><strong id="outcome"></strong><span id="meta"></span></div>
+  <section class="card" id="next"></section>
   <article id="report"></article>
 </main>
+<script src="/web/common.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-const COLORS = {"APPROVE":"var(--ok)","APPROVE WITH CONDITIONS":"var(--warn)","REJECT":"var(--bad)","REFER TO HUMAN":"var(--ref)"};
 function line(text, cls){ const d=document.createElement('div'); d.className=cls||''; d.textContent=text; $('log').appendChild(d); }
 document.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { $('q').value = b.dataset.q; });
+function nextStep(m) {
+  const box = $('next');
+  if (m.outcome === 'APPROVE WITH CONDITIONS' && m.case_id) {
+    const url = `${location.origin}/vendor/${m.case_id}`;
+    box.innerHTML = `<h3>Next: get the vendor's documents</h3>
+      <p class="mut">Send the vendor this link. When they upload their audit report, it is checked and the decision is made again.</p>
+      <div class="row"><code>${esc(url)}</code><a href="${url}" target="_blank">Open vendor page</a></div>`;
+  } else if (m.watch && ['created', 'existing'].includes(m.watch.status)) {
+    box.innerHTML = `<h3>Monitoring is on</h3><p class="mut">Crustdata watch #${esc(m.watch.watch_id)} will alert ${esc(m.watch.email)} if the vendor's news or headcount changes.</p>`;
+  } else if (m.watch) {
+    box.innerHTML = `<h3>Monitoring not set up</h3><p class="mut">${esc(m.watch.reason)}</p>`;
+  } else { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+}
 $('go').onclick = () => {
   const request = $('q').value.trim();
   if (!request) return;
   $('go').disabled = true; $('log').textContent = '';
-  $('verdict').style.display = 'none'; $('report').style.display = 'none';
+  ['verdict', 'report', 'next'].forEach(id => $(id).style.display = 'none');
   const es = new EventSource('/api/review?request=' + encodeURIComponent(request));
   const finish = () => { es.close(); $('go').disabled = false; };
   es.onmessage = e => {
@@ -67,8 +60,9 @@ $('go').onclick = () => {
     if (m.type === 'result') {
       $('outcome').textContent = m.outcome;
       $('verdict').style.setProperty('--c', COLORS[m.outcome] || 'var(--fg)');
-      $('meta').textContent = `${m.audit.verified} of ${m.audit.total} citations verified · ${Math.round(m.elapsed)}s`;
+      $('meta').innerHTML = `${m.audit.verified} of ${m.audit.total} citations verified · ${Math.round(m.elapsed)}s · <a href="/report/${m.case_id}" target="_blank">Full report</a>`;
       $('verdict').style.display = 'block';
+      nextStep(m);
       $('report').innerHTML = m.html; $('report').style.display = 'block';
       finish();
     }

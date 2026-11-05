@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vendor register</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<main class="wide">
+  <header><b>duediligent</b> · vendor register<p>Upload your supplier list and get every vendor reviewed, ranked by risk. <a href="/">Review one vendor</a></p></header>
+  <section class="card">
+    <p class="mut">CSV with a <code>vendor</code> column, and optional <code>domain</code> and <code>purpose</code> columns. Up to 50 rows. <a href="/web/sample_vendors.csv" download>Sample file</a></p>
+    <div class="row"><input type="file" id="file" accept=".csv,text/csv"><button id="go">Review all</button><span id="progress" class="mut"></span></div>
+  </section>
+  <div class="tablewrap"><table id="table" hidden>
+    <thead><tr><th>Vendor</th><th>Decision</th><th>Main reason</th><th>Citations</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+  <p><button id="dl" class="chip" hidden>Download register as CSV</button></p>
+</main>
+<script src="/web/common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let rows = [], total = 0;
+function render() {
+  rows.sort((a, b) => a.severity - b.severity || String(a.vendor).localeCompare(String(b.vendor)));
+  $('rows').innerHTML = rows.map(r => `<tr>
+    <td><b>${esc(r.vendor)}</b><div class="mut">${esc(r.domain || r.input?.domain || "")}</div></td>
+    <td><span class="pill" style="--c:${COLORS[r.outcome] || 'var(--fg)'}">${esc(r.outcome)}</span></td>
+    <td class="reason"><div title="${esc(r.top_reason)}">${esc(r.top_reason)}</div></td>
+    <td class="mut">${r.audit ? `${r.audit.verified}/${r.audit.total}` : ""}</td>
+    <td>${r.case_id ? `<a href="/report/${r.case_id}" target="_blank">Report</a>${r.outcome === "APPROVE WITH CONDITIONS" ? ` · <a href="/vendor/${r.case_id}" target="_blank">Vendor link</a>` : ""}` : ""}</td>
+  </tr>`).join("");
+  $('table').hidden = !rows.length;
+  $('progress').textContent = `${rows.length} of ${total} reviewed`;
+}
+$('go').onclick = async () => {
+  const f = $('file').files[0];
+  if (!f) { $('progress').textContent = 'Choose a CSV first.'; return; }
+  rows = []; render(); $('go').disabled = true; $('dl').hidden = true;
+  const body = new FormData(); body.append('file', f);
+  await postStream('/api/batch', body, m => {
+    if (m.type === 'start') { total = m.total; render(); }
+    if (m.type === 'row') { rows.push(m); render(); }
+    if (m.type === 'error') $('progress').textContent = m.message;
+    if (m.type === 'done') { $('progress').textContent = `All ${total} reviewed.`; $('dl').hidden = false; }
+  });
+  $('go').disabled = false;
+};
+$('dl').onclick = () => {
+  const q = s => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const lines = [["vendor", "domain", "decision", "main_reason", "citations_verified", "report"].join(",")]
+    .concat(rows.map(r => [r.vendor, r.domain, r.outcome, r.top_reason, r.audit ? `${r.audit.verified}/${r.audit.total}` : "", r.case_id ? `${location.origin}/report/${r.case_id}` : ""].map(q).join(",")));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join("\n")], {type: "text/csv"}));
+  a.download = "vendor-register.csv"; a.click();
+};
+</script>
+</body>
+</html>

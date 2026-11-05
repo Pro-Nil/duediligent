@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vendor documents</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+<main>
+  <header><b>duediligent</b> · vendor documents<p id="sub">Loading…</p></header>
+  <section class="card" id="ask"></section>
+  <section class="card">
+    <h3>Upload your audit report</h3>
+    <p class="mut">A SOC 2 Type II report, SOC 3 report or ISO 27001 certificate, as a text PDF. It is checked automatically: the organisation, audit period, auditor and opinion are each read from the document and cited to their page.</p>
+    <div class="row">
+      <input type="file" id="file" accept="application/pdf">
+      <button id="send">Upload and re-check</button>
+    </div>
+  </section>
+  <div id="log" aria-live="polite"></div>
+  <div id="verdict"><strong id="outcome"></strong><span id="meta"></span></div>
+  <article id="report"></article>
+</main>
+<script src="/web/common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const caseId = location.pathname.split("/").pop();
+function line(text, cls){ const d=document.createElement('div'); d.className=cls||''; d.textContent=text; $('log').appendChild(d); }
+function show(m) {
+  $('outcome').textContent = m.outcome;
+  $('verdict').style.setProperty('--c', COLORS[m.outcome] || 'var(--fg)');
+  $('meta').textContent = `${m.audit.verified} of ${m.audit.total} citations verified`;
+  $('verdict').style.display = 'block';
+  $('report').innerHTML = m.html; $('report').style.display = 'block';
+}
+fetch(`/api/case/${caseId}`).then(r => r.json()).then(c => {
+  $('sub').textContent = `Security review of ${c.vendor}${c.domain ? " (" + c.domain + ")" : ""}. Current decision: ${c.outcome}.`;
+  $('ask').innerHTML = `<h3>What the reviewer needs</h3><ul>${c.conditions.map(t => `<li>${esc(t)}</li>`).join("") || "<li>Nothing outstanding.</li>"}</ul>`
+    + (c.documents.length ? `<p class="mut">Already received: ${c.documents.map(d => esc(d.filename)).join(", ")}</p>` : "");
+});
+$('send').onclick = async () => {
+  const f = $('file').files[0];
+  if (!f) { line('Choose a PDF first.', 'warn'); return; }
+  $('send').disabled = true; $('log').textContent = '';
+  const body = new FormData(); body.append('file', f);
+  await postStream(`/api/case/${caseId}/document`, body, m => {
+    if (m.type === 'log' && m.level !== 'done') line(m.message, m.level);
+    if (m.type === 'error') line(m.message, 'warn');
+    if (m.type === 'result') show(m);
+  });
+  $('send').disabled = false;
+};
+</script>
+</body>
+</html>

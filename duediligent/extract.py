@@ -165,8 +165,34 @@ def _month_index(date: str | None) -> int | None:
     return int(match.group(1)) * 12 + int(match.group(2)) if match else None
 
 
+STOP = set("a an the of to in and or on for by was were is its it that this with from has had have about data".split())
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in normalize(text).split() if len(w) > 2 and w not in STOP}
+
+
 def _merge_nearby(rows: list[dict]) -> list[dict]:
-    """Reports date one breach by discovery or disclosure, so join reports within two months."""
+    """Reports date one breach by discovery or disclosure, so join reports within two months.
+    An undated report joins the report it most resembles, so one claim is not counted twice."""
+    dated = [r for r in rows if r.get("date")]
+    undated = [r for r in rows if not r.get("date")]
+    rows = dated
+    for row in undated:
+        mine = _words(row["summary"])
+        best, score = None, 0.0
+        for other in rows:
+            theirs = _words(other["summary"])
+            overlap = len(mine & theirs) / max(len(mine | theirs), 1)
+            if overlap > score:
+                best, score = other, overlap
+        if best is not None and score >= 0.2:
+            best["evidence"] += [e for e in row["evidence"] if e not in best["evidence"]]
+            best["quotes"] += row["quotes"]
+            best["remediated"] = best["remediated"] or row["remediated"]
+        else:
+            rows.append(row)
+    rows = sorted(rows, key=lambda g: g.get("date") or "")
     merged: list[dict] = []
     for row in rows:
         here, prior = _month_index(row.get("date")), _month_index(merged[-1].get("date")) if merged else None

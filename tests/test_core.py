@@ -332,3 +332,11 @@ def test_real_soc3_pages_are_readable_and_quotes_match_across_split_words():
         return
     pages = pdf_pages(pdf.read_bytes())
     assert compact("For the period 01 October 2022 to 30 September 2023") in compact(pages[1])
+
+
+def test_undated_repeat_of_a_claim_joins_the_dated_report():
+    a = Finding("incident", "Hacker grep claimed to have stolen 20GB of Capgemini data including source code", "E1", quote="q1",
+                attrs={"date": "2024-09", "role": "breached_vendor"})
+    b = Finding("incident", "Threat actor grep claimed to have stolen 20GB of Capgemini data", "E2", quote="q2", attrs={"date": None, "role": "breached_vendor"})
+    merged = extract.merge_incidents([a, b])
+    assert len(merged) == 1 and set(merged[0]["evidence"]) == {"E1", "E2"}

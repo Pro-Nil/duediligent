@@ -61,6 +61,59 @@ def _parse_date(value) -> date | None:
         return None
 
 
+MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july", "august",
+                                      "september", "october", "november", "december"], 1)}
+MONTHS.update({m[:3]: i for m, i in list(MONTHS.items())})
+
+
+def dates_in(text: str) -> set[date]:
+    """Every date a sentence states, in the formats audit reports use."""
+    t = (text or "").lower().replace(",", " ")
+    found: set[date] = set()
+
+    def add(y, m, d):
+        try:
+            found.add(date(int(y), int(m), int(d)))
+        except ValueError:
+            pass
+
+    for y, m, d in re.findall(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", t):
+        add(y, m, d)
+    for d, m, y in re.findall(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b", t):
+        add(y, m, d)
+    for d, mon, y in re.findall(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\s+(\d{4})\b", t):
+        if mon in MONTHS:
+            add(y, MONTHS[mon], d)
+    for mon, d, y in re.findall(r"\b([a-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\s+(\d{4})\b", t):
+        if mon in MONTHS:
+            add(y, MONTHS[mon], d)
+    return found
+
+
+def _date_in_quote(value, quote: str) -> bool:
+    parsed = _parse_date(value)
+    return parsed is not None and parsed in dates_in(quote)
+
+
+OPINION_WORDS = {
+    "unqualified": r"in our opinion|fairly stated|present(s|ed)? fairly|were effective|suitably designed|in all material respects",
+    "qualified": r"except for|qualified opinion|qualified",
+    "adverse": r"adverse|not fairly|were not effective",
+    "disclaimer": r"do not express|disclaim",
+}
+
+
+def _opinion_in_quote(value, quote: str) -> bool:
+    """The opinion counts only if it is a real verdict and its sentence reads like one."""
+    pattern = OPINION_WORDS.get(str(value or "").lower())
+    if not pattern:
+        return False
+    q = (quote or "").lower()
+    if value == "unqualified" and re.search(OPINION_WORDS["qualified"] + "|" + OPINION_WORDS["adverse"], q):
+        return False
+    return bool(re.search(pattern, q))
+
+
 def check_document(llm: LLM, store: EvidenceStore, data: bytes, filename: str, vendor_name: str,
                    vendor_domain: str, today: date | None = None) -> dict:
     """Returns the document check the rulebook reads. Unverified fields count as unknown."""
@@ -98,9 +151,19 @@ def check_document(llm: LLM, store: EvidenceStore, data: bytes, filename: str, v
                 break
 
     org = str(raw.get("organisation") or "")
+    auditor = str(raw.get("auditor") or "")
+    # A quote on the page is not enough: it must also say what the model claims it says.
+    # Otherwise one real sentence could be reused to "support" every field.
+    supported = {
+        "organisation": bool(org) and compact(org) in compact(verified.get("organisation", {}).get("quote", "")),
+        "auditor": bool(auditor) and compact(auditor) in compact(verified.get("auditor", {}).get("quote", "")),
+        "period": _date_in_quote(raw.get("valid_until") or raw.get("period_end"), verified.get("period", {}).get("quote", "")),
+        "opinion": _opinion_in_quote(raw.get("opinion"), verified.get("opinion", {}).get("quote", "")),
+    }
+    verified = {k: v for k, v in verified.items() if supported.get(k, True)}
     stem = compact(vendor_domain.split(".")[0]) if vendor_domain else ""
-    names_vendor = bool(org) and (compact(vendor_name) in compact(org) or compact(org) in compact(vendor_name)
-                                  or (len(stem) >= 4 and stem in compact(org)))
+    names_vendor = "organisation" in verified and (compact(vendor_name) in compact(org) or compact(org) in compact(vendor_name)
+                                                   or (len(stem) >= 4 and stem in compact(org)))
     period_end = _parse_date(raw.get("period_end")) if "period" in verified else None
     valid_until = _parse_date(raw.get("valid_until")) if "period" in verified else None
     if valid_until:
@@ -112,7 +175,7 @@ def check_document(llm: LLM, store: EvidenceStore, data: bytes, filename: str, v
     else:
         age_months, current = None, False
     opinion = raw.get("opinion") if "opinion" in verified else "unknown"
-    unknown = [k for k in ("organisation", "period", "opinion") if k not in verified]
+    unknown = [k for k in ("organisation", "period", "opinion", "auditor") if k not in verified]
     return {
         "readable": True,
         "filename": filename,
@@ -120,7 +183,7 @@ def check_document(llm: LLM, store: EvidenceStore, data: bytes, filename: str, v
         "organisation": org,
         "organisation_verified": "organisation" in verified,
         "names_vendor": names_vendor,
-        "auditor": raw.get("auditor"),
+        "auditor": auditor if "auditor" in verified else None,
         "period_start": raw.get("period_start"),
         "period_end": raw.get("period_end") if "period" in verified else None,
         "valid_until": raw.get("valid_until") if "period" in verified else None,

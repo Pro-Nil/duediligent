@@ -54,23 +54,27 @@ def _documents_rule(d: Decision, documents: list[dict], identity: dict) -> None:
         kind = DOC_NAMES.get(doc.get("report_type"), "document")
         ev = doc.get("evidence") or []
         label = f"The uploaded {kind} ({doc.get('filename')})"
-        stale = "period" not in (doc.get("unknown") or []) and not doc.get("current")
-        if doc.get("unknown") and not stale:
-            d.conditions.append(Reason("R5 document", f"{label}: could not confirm its {', '.join(doc['unknown'])} from the document itself.", ev))
-        elif not doc.get("names_vendor"):
+        unknown = doc.get("unknown") or []
+        stale = "period" not in unknown and not doc.get("current")
+        if doc.get("organisation_verified") and not doc.get("names_vendor"):
             d.referrals.append(Reason("R5 document", f"{label} is for {doc.get('organisation')}, not {identity.get('name')}.", ev))
-        elif doc.get("opinion") in ("adverse", "disclaimer"):
+        elif "opinion" not in unknown and doc.get("opinion") in ("adverse", "disclaimer"):
             d.reasons.append(Reason("R5 document", f"{label} carries an {doc['opinion']} audit opinion.", ev))
             d.outcome = REJECT
-        elif not doc.get("current"):
+        elif stale:
             when = doc.get("valid_until") and f"expired {doc['valid_until']}" or f"covers a period ending {doc.get('period_end')}, {doc.get('age_months')} months ago"
             d.conditions.append(Reason("R5 document", f"{label} {when}. Reports older than 12 months do not show current controls. Request the latest report or a bridge letter.", ev))
+        elif unknown:
+            d.conditions.append(Reason("R5 document", f"{label}: could not confirm its {', '.join(unknown)} from the document itself.", ev))
         elif doc.get("opinion") == "qualified" or doc.get("exceptions"):
             listed = "; ".join(doc.get("exceptions") or ["the auditor qualified the opinion"])
             d.conditions.append(Reason("R5 document", f"{label} is current but reports exceptions: {listed}. Confirm each is fixed.", ev))
-        else:
+        elif (doc.get("opinion") == "unqualified" and doc.get("current") and doc.get("names_vendor") and doc.get("auditor")):
+            # Every field confirmed against the document's own words: only then is it accepted.
             accepted = True
             d.notes.append(Reason("R5 document", f"{label} is current, issued by {doc.get('auditor')}, and the auditor's opinion is unqualified. Certification condition met.", ev))
+        else:
+            d.conditions.append(Reason("R5 document", f"{label} could not be confirmed as a current, clean audit of {identity.get('name')}.", ev))
     if not accepted and not d.conditions and not d.referrals and d.outcome != REJECT:
         d.conditions.append(Reason("R5 document", "No uploaded document satisfies the certification requirement.", [e for doc in documents for e in doc.get("evidence") or []]))
 

@@ -294,7 +294,7 @@ def test_acronym_with_a_better_known_full_name_is_referred():
 
 def doc(**over):
     base = {"readable": True, "filename": "r.pdf", "report_type": "SOC2_TYPE2", "organisation": "Acme Inc", "names_vendor": True,
-            "auditor": "KPMG", "period_end": "2026-06-30", "age_months": 5, "current": True, "opinion": "unqualified",
+            "auditor": "KPMG", "organisation_verified": True, "period_end": "2026-06-30", "age_months": 5, "current": True, "opinion": "unqualified",
             "exceptions": [], "unknown": [], "evidence": ["E9"]}
     base.update(over)
     return base
@@ -401,3 +401,144 @@ def test_a_name_plus_description_matches_the_named_record():
 def test_choices_offered_are_only_plausible_ones():
     r = resolve([("Zentrix Labs", "zentrixlabs.com", "11-50"), ("Security Bank Corporation", "securitybank.com", "5001-10000")], "zentri security")
     assert r["status"] == "unresolved" and [o["domain"] for o in r["options"]] == ["zentrixlabs.com"]
+
+
+class DocLLM:
+    def __init__(self, reply):
+        self.reply = reply
+
+    def json(self, system, user, max_tokens=2000, retries=1, required=()):
+        return self.reply
+
+
+def _soc3():
+    from pathlib import Path
+    pdf = Path(__file__).parent / "fixtures" / "capgemini-soc3.pdf"
+    return pdf.read_bytes() if pdf.exists() else None
+
+
+def test_one_real_quote_reused_for_every_field_does_not_approve():
+    from duediligent.documents import check_document
+    data = _soc3()
+    if data is None:
+        return
+    q = {"page": 2, "quote": "For the period 01 October 2022 to 30 September 2023"}
+    reply = {"report_type": "SOC2_TYPE2", "organisation": "Acme Inc", "auditor": None, "period_end": "2026-06-30",
+             "opinion": "unknown", "exceptions": [], "quotes": {"organisation": q, "period": q, "opinion": q, "auditor": q}}
+    doc = check_document(DocLLM(reply), EvidenceStore(), data, "x.pdf", "Acme Inc", "acme.com", today=TODAY)
+    assert set(doc["unknown"]) == {"organisation", "period", "opinion", "auditor"}
+    d = policy.evaluate(base_ctx(certifications=[], identity={"status": "resolved", "name": "Acme Inc", "domain": "acme.com", "evidence": ["E1"]},
+                                 documents=[doc]), TODAY)
+    assert d.outcome != policy.APPROVE
+
+
+def test_real_quotes_with_matching_values_are_read_correctly():
+    from duediligent.documents import check_document
+    data = _soc3()
+    if data is None:
+        return
+    reply = {"report_type": "SOC3", "organisation": "Capgemini Technology Services India Limited",
+             "auditor": "KPMG Assurance and Consulting Services LLP", "period_start": "2022-10-01", "period_end": "2023-09-30",
+             "opinion": "unqualified", "exceptions": [], "quotes": {
+                 "organisation": {"page": 5, "quote": "We have examined Capgemini Technology Services India Limited"},
+                 "period": {"page": 2, "quote": "For the period 01 October 2022 to 30 September 2023"},
+                 "opinion": {"page": 6, "quote": "In our opinion, management’s statement that the controls within Capgemini’ System were effective throughout the period"},
+                 "auditor": {"page": 1, "quote": "KPMG Assurance and Consulting Services LLP (herein after referred to as"}}}
+    doc = check_document(DocLLM(reply), EvidenceStore(), data, "soc3.pdf", "Capgemini", "capgemini.com", today=TODAY)
+    assert doc["unknown"] == [] and doc["names_vendor"] and not doc["current"]
+
+
+def test_unknown_opinion_never_counts_as_clean():
+    d = policy.evaluate(base_ctx(certifications=[], documents=[doc(opinion="unknown")]), TODAY)
+    assert d.outcome == policy.CONDITIONS
+
+
+def test_missing_auditor_is_not_accepted():
+    d = policy.evaluate(base_ctx(certifications=[], documents=[doc(auditor=None, unknown=["auditor"])]), TODAY)
+    assert d.outcome == policy.CONDITIONS
+
+
+def test_dates_are_read_in_audit_report_formats():
+    from datetime import date as _d
+    from duediligent.documents import dates_in
+    got = dates_in("from 1st October 2022 through September 30, 2023, renewed 2024-03-31 and 31/03/2025")
+    assert {_d(2022, 10, 1), _d(2023, 9, 30), _d(2024, 3, 31), _d(2025, 3, 31)} <= got
+
+
+def test_two_reviews_saved_in_the_same_second_get_different_cases(tmp_path, monkeypatch):
+    from duediligent import agent
+    monkeypatch.setattr(agent, "RUNS", tmp_path)
+    monkeypatch.setattr(agent.time, "time", lambda: 1793900000.0)
+    result = {"identity": {"name": "Acme"}, "intake": {}, "decision": {"outcome": "APPROVE", "reasons": [], "conditions": [], "referrals": [], "notes": []},
+              "request": "r", "reviewed_at": "x", "sensitivity": "medium", "audit": {"verified": 0, "total": 0, "problems": []},
+              "incidents": [], "certifications": [], "coverage": {}, "findings": [], "evidence": []}
+    monkeypatch.setattr(agent, "_write", lambda folder, r, store: (folder / "report.json").write_text("{}"))
+    a = agent._save(dict(result), EvidenceStore())["folder"]
+    b = agent._save(dict(result), EvidenceStore())["folder"]
+    assert a != b
+
+
+def test_uploads_to_one_case_run_one_at_a_time(monkeypatch):
+    import threading
+    import time as _t
+    from duediligent import agent
+    active, peak = [0], [0]
+
+    def slow(*args, **kwargs):
+        active[0] += 1
+        peak[0] = max(peak[0], active[0])
+        _t.sleep(0.2)
+        active[0] -= 1
+        return {}
+    monkeypatch.setattr(agent, "_apply_document", slow)
+    threads = [threading.Thread(target=agent.apply_document, args=("same-case", b"", "a.pdf")) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak[0] == 1
+
+
+def test_two_watch_requests_for_one_domain_create_one_watch(tmp_path, monkeypatch):
+    import threading
+    import time as _t
+    from duediligent import watch
+    monkeypatch.setattr(watch, "REGISTRY", tmp_path / "watches.json")
+    monkeypatch.setenv("WATCH_EMAIL", "me@example.com")
+    created = []
+
+    class SlowCrust:
+        def _post(self, path, body, retries=1):
+            _t.sleep(0.2)
+            created.append(body)
+            return {"id": 1000 + len(created)}
+    out = []
+    threads = [threading.Thread(target=lambda: out.append(watch.ensure_watch(SlowCrust(), "acme.com"))) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(created) == 1 and {o["watch_id"] for o in out} == {1001}
+
+
+def test_csv_with_a_byte_order_mark_keeps_its_header():
+    from duediligent.server import _rows_from_csv
+    rows = _rows_from_csv("﻿vendor,purpose\nOkta,single sign-on\n")
+    assert rows == [{"vendor": "Okta", "domain": "", "purpose": "single sign-on"}]
+
+
+def test_csv_quoted_multiline_field_keeps_the_words_apart():
+    from duediligent.server import _rows_from_csv
+    rows = _rows_from_csv('vendor,purpose\nOkta,"single sign-on\nfor all staff"\n')
+    assert rows[0]["purpose"] == "single sign-on for all staff"
+
+
+def test_csv_huge_field_is_cut_not_crashed():
+    from duediligent.server import _rows_from_csv
+    rows = _rows_from_csv("vendor,purpose\nOkta," + "x" * 200000 + "\n")
+    assert len(rows[0]["purpose"]) == 500
+
+
+def test_csv_rows_beyond_fifty_are_dropped():
+    from duediligent.server import _rows_from_csv
+    assert len(_rows_from_csv("vendor\n" + "\n".join(f"V{i}" for i in range(80)))) == 50

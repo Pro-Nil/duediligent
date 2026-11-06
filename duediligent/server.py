@@ -14,10 +14,11 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .agent import RUNS, apply_document, case_dir, review
+from .agent import RUNS, apply_document, case_dir, case_lock, review
 from .agent import _history as agent_history
 from .config import load_env
 from .crust import Crust
+from .watch import _LOCK as WATCH_LOCK
 from .watch import ensure_watch
 from .llm import LLM
 from .report import markdown_body, to_html, to_markdown
@@ -95,6 +96,11 @@ def overview_page() -> FileResponse:
     return FileResponse(WEB / "overview.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(WEB / "favicon.ico", media_type="image/vnd.microsoft.icon")
+
+
 @app.get("/vendor/{case_id}")
 def vendor_page(case_id: str) -> FileResponse:
     _case(case_id)
@@ -130,7 +136,8 @@ def _status(result: dict) -> str:
     """Where the case stands, in the words a reviewer would use."""
     outcome = result["decision"]["outcome"]
     if any(h.get("kind") == "clarified" for h in result.get("history") or []):
-        return "Done"
+        # The referral itself still stands; the work moved to the follow-up review.
+        return "Answered"
     uploads = [h for h in result.get("history") or [] if h.get("kind") == "vendor_upload"]
     if outcome == "REFER TO HUMAN":
         return "Needs a person"
@@ -166,6 +173,7 @@ def _case_row(folder: Path) -> dict | None:
         "updated_at": history[-1].get("at") if history else result.get("reviewed_at"),
         "last_event": history[-1] if history else None,
         "version": version,
+        "follow_up": next((h.get("child") for h in reversed(history) if h.get("kind") == "clarified"), None),
         "unread": version > _seen(folder),
     }
 
@@ -186,8 +194,9 @@ def case_version(case_id: str) -> dict:
 @app.post("/api/case/{case_id}/seen")
 def mark_seen(case_id: str) -> dict:
     folder = _case(case_id)
-    row = _case_row(folder)
-    (folder / "seen.json").write_text(json.dumps({"version": row["version"]}), encoding="utf-8")
+    with case_lock(case_id):
+        row = _case_row(folder)
+        (folder / "seen.json").write_text(json.dumps({"version": row["version"]}), encoding="utf-8")
     return {"ok": True, "version": row["version"]}
 
 
@@ -226,7 +235,7 @@ def stats() -> dict:
             r["history"] = agent_history(r)
             results.append(r)
     outcomes = {k: 0 for k in SEVERITY}
-    statuses = {"Vendor responded": 0, "Waiting on vendor": 0, "Needs a person": 0, "Done": 0}
+    statuses = {"Vendor responded": 0, "Waiting on vendor": 0, "Needs a person": 0, "Answered": 0, "Done": 0}
     issues: dict[str, int] = {}
     cited = total_claims = sources = elapsed_n = 0
     elapsed = 0.0
@@ -360,14 +369,15 @@ def watch_test(domain: str) -> dict:
 def watch_cancel(domain: str) -> dict:
     """Stop watching a vendor. Crustdata cancels the watch; it cannot be resumed."""
     path = RUNS / "watches.json"
-    registry = json.loads(path.read_text(encoding="utf-8"))
-    if domain not in registry:
-        raise HTTPException(404, "Not watched")
-    resp = Crust().client.delete(f"/watch/company/{registry[domain]['watch_id']}")
-    if resp.status_code not in (200, 204):
-        raise HTTPException(502, f"Crustdata said: {resp.text[:200]}")
-    registry.pop(domain)
-    path.write_text(json.dumps(registry, indent=1), encoding="utf-8")
+    with WATCH_LOCK:
+        registry = json.loads(path.read_text(encoding="utf-8"))
+        if domain not in registry:
+            raise HTTPException(404, "Not watched")
+        resp = Crust().client.delete(f"/watch/company/{registry[domain]['watch_id']}")
+        if resp.status_code not in (200, 204):
+            raise HTTPException(502, f"Crustdata said: {resp.text[:200]}")
+        registry.pop(domain)
+        path.write_text(json.dumps(registry, indent=1), encoding="utf-8")
     return {"ok": True}
 
 
@@ -420,13 +430,15 @@ def clarify(case_id: str, name: str = "", domain: str = "") -> StreamingResponse
         try:
             result = review(parent["request"], emit, watch=True,
                             pinned={"name": name.strip() or None, "domain": domain or None, "parent": case_id})
-            # Link both ways, so each case shows where the other is.
-            parent.setdefault("history", agent_history(parent))
-            parent["history"] = agent_history(parent) + [{
+            # Link both ways, so each case shows where the other is. Re-read under the case's
+            # lock, so an upload or a second answer saved meanwhile is not overwritten.
+            with case_lock(case_id):
+                fresh = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+                fresh["history"] = agent_history(fresh) + [{
                 "at": result["created_at"], "kind": "clarified", "by": "you", "outcome": result["decision"]["outcome"],
                 "choice": f"{name.strip()} {domain}".strip(), "child": result.get("case_id"),
-                "event": f"You confirmed {name.strip() or domain}"}]
-            (folder / "report.json").write_text(json.dumps(parent, indent=2, default=str), encoding="utf-8")
+                    "event": f"You confirmed {name.strip() or domain}"}]
+                (folder / "report.json").write_text(json.dumps(fresh, indent=2, default=str), encoding="utf-8")
             events.put({"type": "result", **_summary(result), "elapsed": result["elapsed_seconds"]})
         except Exception as exc:  # noqa: BLE001
             events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
@@ -463,22 +475,33 @@ async def upload_document(case_id: str, file: UploadFile = File(...)) -> Streami
     return _stream(events)
 
 
+MAX_CSV_BYTES = 1024 * 1024
+FIELD_LIMITS = {"vendor": 200, "domain": 253, "purpose": 500}
+csv.field_size_limit(MAX_CSV_BYTES)
+
+
+def _clean(value: str, key: str) -> str:
+    """One line, single spaces, and a sane length: a line break inside a quoted field becomes a space."""
+    return " ".join((value or "").split())[:FIELD_LIMITS[key]]
+
+
 def _rows_from_csv(text: str) -> list[dict]:
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
+    """Read the whole file as CSV, so quoted fields may contain commas and line breaks."""
+    text = text.lstrip("﻿")
+    try:
+        records = [r for r in csv.reader(io.StringIO(text)) if any(c.strip() for c in r)]
+    except csv.Error as exc:
+        raise ValueError(f"The file is not valid CSV: {exc}") from exc
+    if not records:
         return []
-    header = [h.strip().lower() for h in next(csv.reader([lines[0]]))]
+    header = [h.strip().lower().lstrip("﻿") for h in records[0]]
     has_header = any(h in ("vendor", "name", "company", "domain", "website") for h in header)
-    reader = csv.reader(lines[1:] if has_header else lines)
     rows = []
-    for cells in reader:
-        cells = [c.strip() for c in cells]
-        if not any(cells):
-            continue
+    for cells in records[1:] if has_header else records:
         row = dict(zip(header, cells)) if has_header else {"vendor": cells[0], "domain": cells[1] if len(cells) > 1 else ""}
-        name = row.get("vendor") or row.get("name") or row.get("company") or ""
-        domain = row.get("domain") or row.get("website") or ""
-        purpose = row.get("purpose") or row.get("use") or ""
+        name = _clean(row.get("vendor") or row.get("name") or row.get("company") or "", "vendor")
+        domain = _clean(row.get("domain") or row.get("website") or "", "domain").lower()
+        purpose = _clean(row.get("purpose") or row.get("use") or "", "purpose")
         if name or domain:
             rows.append({"vendor": name, "domain": domain, "purpose": purpose})
     return rows[:50]
@@ -486,8 +509,13 @@ def _rows_from_csv(text: str) -> list[dict]:
 
 @app.post("/api/batch")
 async def run_batch(file: UploadFile = File(...)) -> StreamingResponse:
-    text = (await file.read()).decode("utf-8", "replace")
-    rows = _rows_from_csv(text)
+    data = await file.read(MAX_CSV_BYTES + 1)
+    if len(data) > MAX_CSV_BYTES:
+        raise HTTPException(413, "The file is larger than 1 MB. A supplier list of 50 rows is far smaller.")
+    try:
+        rows = _rows_from_csv(data.decode("utf-8-sig", "replace"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if not rows:
         raise HTTPException(400, "No vendors found. Use a CSV with a vendor column, and optional domain and purpose columns.")
     events: queue.Queue = queue.Queue()

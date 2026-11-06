@@ -1,8 +1,10 @@
 """Render the finished assessment. Every line is built from verified findings."""
 from __future__ import annotations
 
+import base64
 import html
 import re
+from pathlib import Path
 
 CERT_NAMES = {"SOC2_TYPE2": "SOC 2 Type II", "SOC2": "SOC 2", "ISO27001": "ISO 27001", "ISO27701": "ISO 27701",
               "PCI_DSS": "PCI DSS", "HIPAA": "HIPAA", "FEDRAMP": "FedRAMP", "OTHER": "Other"}
@@ -232,6 +234,8 @@ REPORT_CSS = """
 @media (prefers-color-scheme:dark){:root{--bg:#121317;--fg:#ececef;--mut:#9a9da6;--line:#2b2d34;--accent:#8ea5ff;--ok:#5fd08f;--warn:#e5b45a;--bad:#ff8a8a;--ref:#bda6ff}}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,'Segoe UI',sans-serif}
 .report{max-width:800px;margin:0 auto;padding:32px 16px}
+.report-brand{display:flex;align-items:center;gap:8px;margin:0 0 16px;color:var(--mut);font-weight:600}
+.report-brand img{box-sizing:border-box;width:28px;height:28px;padding:4px;border-radius:6px;background:#102a3f;print-color-adjust:exact}
 h1{font-size:24px;margin:0 0 12px}h2{font-size:15px;margin:28px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
 ul{padding-left:18px;margin:6px 0}li{margin:4px 0;overflow-wrap:anywhere}li.quote{color:var(--mut);list-style:none;font-size:13.5px}
 .rule{color:var(--mut);font-size:12.5px}.cite{font:12px ui-monospace,monospace;color:var(--accent);text-decoration:none}
@@ -255,9 +259,13 @@ li:target{background:color-mix(in srgb,var(--accent) 16%,transparent)}
 
 
 def to_html(r: dict, back: str | None = None) -> str:
+    assets = Path(__file__).resolve().parent.parent / "web"
+    icon = "data:image/png;base64," + base64.b64encode((assets / "brand-icon.png").read_bytes()).decode("ascii")
+    favicon = "data:image/vnd.microsoft.icon;base64," + base64.b64encode((assets / "favicon.ico").read_bytes()).decode("ascii")
+    brand = f'<div class="report-brand"><img src="{icon}" alt="" width="28" height="28">duediligent</div>'
     bar = ("<div class=bar><span>Printable version. Use Save as PDF in the print dialog to keep a copy.</span>"
            "<button onclick='window.print()'>Print or save as PDF</button>"
            + (f"<a href='{html.escape(back)}'>Back to the review</a>" if back else "") + "</div>")
     return (f"<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-            f"<title>{html.escape(_title(r))} assessment</title><style>{REPORT_CSS}</style>"
-            f"{bar}<div class=report>{markdown_body(to_markdown(r))}</div></html>")
+            f'<title>{html.escape(_title(r))} assessment</title><link rel="icon" href="{favicon}"><style>{REPORT_CSS}</style>'
+            f"{bar}<div class=report>{brand}{markdown_body(to_markdown(r))}</div></html>")

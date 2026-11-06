@@ -1,4 +1,4 @@
-# duediligent
+# <img src="web/brand-icon.png" width="32" height="32" alt=""> duediligent
 
 An agent that does a vendor security reviewer's job. Give it a request in plain words, and it returns a finished risk assessment: approve, approve with conditions, reject, or refer to a human. Every claim links to the source it came from.
 

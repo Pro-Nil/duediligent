@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Reviews</title>
+<link rel="icon" href="/web/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/web/style.css">
@@ -40,6 +41,7 @@ const STATUS = {
   "Vendor responded": {c: "var(--accent)", help: "The vendor uploaded a document. Open it to see the new decision."},
   "Waiting on vendor": {c: "var(--warn)", help: "Conditions are open and the vendor link has not been used yet."},
   "Needs a person": {c: "var(--ref)", help: "The agent stopped rather than guess. Someone needs to decide."},
+  "Answered": {c: "var(--mut)", help: "You told the agent which company you meant. This referral stays as it was; the follow-up review carries on."},
   "Done": {c: "var(--ok)", help: "Approved or rejected. Nothing is waiting."},
 };
 let cases = [], show = "All", known = null;
@@ -51,13 +53,31 @@ $("alerts").onclick = () => enableAlerts($("alerts"));
 function lastActivity(c) {
   const h = c.last_event || {};
   if (h.kind === "vendor_upload") return `Vendor uploaded ${esc(h.file)}`;
+  if (h.kind === "clarified") return `You confirmed ${esc(h.choice)}`;
   return "Review completed";
 }
 
-function render() {
+let lastDrawn = "";
+function render(force) {
+  // The page refreshes itself; redraw only when something changed, and give keyboard
+  // focus back to the row (or control) that had it, so tabbing is never interrupted.
+  const snapshot = JSON.stringify([show, cases]);
+  if (!force && snapshot === lastDrawn) return;
+  lastDrawn = snapshot;
+  const active = document.activeElement;
+  const focusRow = active?.closest?.("tr[data-id]")?.dataset.id;
+  const focusFilter = active?.closest?.("[data-s]")?.dataset.s;
+  const focusLink = active?.tagName === "A" && active.closest("tr[data-id]") ? active.getAttribute("href") : null;
+  draw();
+  if (focusLink) document.querySelector(`#rows a[href="${CSS.escape(focusLink)}"]`)?.focus();
+  else if (focusRow) document.querySelector(`#rows tr[data-id="${CSS.escape(focusRow)}"]`)?.focus();
+  else if (focusFilter) document.querySelector(`#filters [data-s="${CSS.escape(focusFilter)}"]`)?.focus();
+}
+
+function draw() {
   const counts = {All: cases.length};
   for (const c of cases) counts[c.status] = (counts[c.status] || 0) + 1;
-  $("filters").innerHTML = ["All", "Vendor responded", "Waiting on vendor", "Needs a person", "Done"].map(k =>
+  $("filters").innerHTML = ["All", "Vendor responded", "Waiting on vendor", "Needs a person", "Answered", "Done"].map(k =>
     `<button class="${show === k ? "on" : ""}" data-s="${k}" title="${esc(STATUS[k]?.help || "")}">${k}<span class="n">${counts[k] || 0}</span></button>`).join("");
   const rows = cases.filter(c => show === "All" || c.status === show);
   $("rows").innerHTML = rows.map(c => `<tr class="rowmain ${c.unread ? "unread" : ""}" data-id="${esc(c.case_id)}" tabindex="0">
@@ -65,7 +85,7 @@ function render() {
         <div class="mut small">${esc(c.domain || "")}</div></td>
       <td><span class="status" style="--c:${STATUS[c.status]?.c}" title="${esc(STATUS[c.status]?.help)}"><i></i>${esc(c.status)}</span>
         ${c.conditions ? `<div class="mut small">${c.conditions} condition${c.conditions > 1 ? "s" : ""} open</div>` : ""}</td>
-      <td>${badge(c.outcome)}</td>
+      <td>${badge(c.outcome)}${c.follow_up ? `<div class="small" style="margin-top:4px"><a href="/report/${esc(c.follow_up)}">Open the follow-up review</a></div>` : ""}</td>
       <td><div class="small">${lastActivity(c)}</div><div class="mut small">${esc(fmtDate(c.updated_at))}</div></td>
       <td class="act"><a class="btn ghost sm" href="/report/${esc(c.case_id)}">Open</a></td>
     </tr>`).join("") || `<tr><td colspan="5" class="empty">${cases.length ? "Nothing here." : "No reviews yet. Start one from New review."}</td></tr>`;
@@ -83,7 +103,7 @@ async function load() {
   known = Object.fromEntries(r.cases.map(c => [c.case_id, c.version]));
   cases = r.cases; render();
 }
-$("filters").onclick = e => { const b = e.target.closest("[data-s]"); if (b) { show = b.dataset.s; render(); } };
+$("filters").onclick = e => { const b = e.target.closest("[data-s]"); if (b) { show = b.dataset.s; render(true); } };
 $("rows").onclick = e => { if (e.target.closest("a")) return; const tr = e.target.closest("tr[data-id]"); if (tr) location.href = `/report/${tr.dataset.id}`; };
 $("rows").onkeydown = e => { const tr = e.target.closest("tr[data-id]"); if (tr && e.key === "Enter") location.href = `/report/${tr.dataset.id}`; };
 load();

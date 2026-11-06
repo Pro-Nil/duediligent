@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
+import threading
 import time
 from dataclasses import asdict
 from datetime import date
@@ -393,9 +395,26 @@ def case_dir(case_id: str) -> Path:
     return folder
 
 
+_case_locks: dict[str, threading.Lock] = {}
+_case_locks_guard = threading.Lock()
+
+
+def case_lock(case_id: str) -> threading.Lock:
+    """One lock per case, so two writers never read the same version and both save it."""
+    with _case_locks_guard:
+        return _case_locks.setdefault(case_id, threading.Lock())
+
+
 def apply_document(case_id: str, data: bytes, filename: str, emit: Emit | None = None,
                    llm: LLM | None = None, crust: Crust | None = None) -> dict:
-    """The vendor sent a document: check it, decide again, and save the case's new version."""
+    """The vendor sent a document: check it, decide again, and save the case's new version.
+    Uploads to one case run one at a time, so a second upload builds on the first."""
+    with case_lock(case_id):
+        return _apply_document(case_id, data, filename, emit, llm, crust)
+
+
+def _apply_document(case_id: str, data: bytes, filename: str, emit: Emit | None = None,
+                    llm: LLM | None = None, crust: Crust | None = None) -> dict:
     emit = emit or (lambda level, msg: None)
     folder = case_dir(case_id)
     result = json.loads((folder / "report.json").read_text(encoding="utf-8"))
@@ -470,8 +489,15 @@ def _audit(store: EvidenceStore, findings: list[Finding], ctx: dict, decision: p
 def _save(result: dict, store: EvidenceStore) -> dict:
     name = result["identity"].get("name") or result["intake"].get("vendor_name") or "unknown"
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "unknown"
-    folder = RUNS / f"{slug}-{int(time.time())}"
-    folder.mkdir(parents=True, exist_ok=True)
+    # A random suffix keeps two reviews saved in the same second from sharing a folder,
+    # and exist_ok=False makes any collision fail loudly instead of overwriting.
+    while True:
+        folder = RUNS / f"{slug}-{int(time.time())}-{secrets.token_hex(3)}"
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            break
+        except FileExistsError:
+            continue
     _write(folder, result, store)
     return {"folder": str(folder), "markdown": str(folder / "report.md"), "html": str(folder / "report.html")}
 

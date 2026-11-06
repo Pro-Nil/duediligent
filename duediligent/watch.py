@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 from .crust import Crust, CrustError
@@ -21,8 +22,17 @@ def _load() -> dict:
         return {}
 
 
+_LOCK = threading.Lock()
+
+
 def ensure_watch(crust: Crust, domain: str) -> dict:
-    """One watch per vendor domain. Re-running never creates a second one."""
+    """One watch per vendor domain. Re-running never creates a second one: the check,
+    the create and the save happen under one lock, so two requests cannot both create."""
+    with _LOCK:
+        return _ensure_watch(crust, domain)
+
+
+def _ensure_watch(crust: Crust, domain: str) -> dict:
     registry = _load()
     if domain in registry:
         return {"status": "existing", **registry[domain]}

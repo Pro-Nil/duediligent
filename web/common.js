@@ -186,7 +186,8 @@ function makeStages(el, stages = STAGES) {
       if (!current) return;
       const n = node(current);
       n.querySelector(".d").textContent = msg;
-      if (warn) n.classList.add("warn");
+      // A retry that worked is not a problem: only the latest message decides the colour.
+      n.classList.toggle("warn", !!warn);
     },
     finish() { el.querySelectorAll(".step").forEach(n => { n.classList.remove("active"); if (!n.classList.contains("warn")) n.classList.add("done"); }); },
   };

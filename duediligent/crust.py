@@ -20,6 +20,12 @@ RATE_LIMITS = {
     "/company/identify": 30,
     "/company/enrich": 15,
 }
+CALL_NAMES = {
+    "/web/search/live": "A Crustdata web search",
+    "/web/enrich/live": "A Crustdata page fetch",
+    "/company/identify": "The Crustdata company lookup",
+    "/company/enrich": "The Crustdata company record",
+}
 ENRICH_FIELDS = [
     "basic_info", "headcount", "funding", "revenue", "hiring",
     "people", "news", "locations", "software_reviews", "social_profiles",
@@ -91,7 +97,7 @@ class Crust:
                 resp = self.client.post(path, json=body)
             except httpx.HTTPError as exc:
                 last = f"{type(exc).__name__}: {exc}"
-                self.notify(f"{path} failed ({type(exc).__name__}), retrying")
+                self.notify(f"{CALL_NAMES.get(path, path)} timed out ({type(exc).__name__}). Trying again.")
                 time.sleep(1.5 * (attempt + 1))
                 continue
             self.calls.append({
@@ -101,13 +107,13 @@ class Crust:
             })
             if resp.status_code == 429:
                 wait = float(resp.headers.get("x-ratelimit-reset") or 5)
-                self.notify(f"{path} rate limited, waiting {wait:.0f}s")
+                self.notify(f"{CALL_NAMES.get(path, path)} is busy. Waiting {wait:.0f}s, then trying again.")
                 time.sleep(min(wait, 60) + random.random())
                 last = "rate limited"
                 continue
             if resp.status_code >= 500:
                 last = f"HTTP {resp.status_code}"
-                self.notify(f"{path} returned {resp.status_code}, retrying")
+                self.notify(f"{CALL_NAMES.get(path, path)} had a server error ({resp.status_code}). Trying again.")
                 time.sleep(1.5 * (attempt + 1))
                 continue
             if resp.status_code in (401, 402, 403):
